@@ -1,29 +1,32 @@
 /* -!- C++ -!- ********************************************* Alternative
  * Graphic Serial LCD Libary Header File
- * 
+ *
  * Parts of this library are based on the original Sparkfun library by:
  *
- * Joel Bartlett 
+ * Joel Bartlett
  * SparkFun Electronics
  * 9-25-13
- * 
- * Jon Green - 205-04-01 
+ *
+ * Jon Green - 205-04-01
  * New interface and in-line definitions added 2015-04-01 and library
  * re-formatted
- * 
- * 
+ *
+ * Dan Cech - 2019-01-07
+ * Removed PROGMEM to support use on ESP8266/ESP32
+ *
+ * Copyright (c) 2019 Dan Cech
  * Copyright (c) 2015 Jon Green
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
  * to deal in the Software without restriction, including without limitation
  * the rights to use, copy, modify, merge, publish, distribute, sublicense,
  * and/or sell copies of the Software, and to permit persons to whom the
  * Software is furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -31,7 +34,7 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
- * 
+ *
  ***************************************************************************/
 
 #ifndef _GLCD_H_
@@ -72,11 +75,11 @@
 // Perform a proportial font face
 #define GLCD_MODE_FONT_PROPORTIONAL ((uint8_t)(0x20))   /* Proportional font spacing */
 
-// Font type definitions 
+// Font type definitions
 #define GLCD_FONT_NORMAL           0    /* Normal size font */
 #define GLCD_FONT_TOM_THUMB        1    /* Small size font */
 
-// Font positioning 
+// Font positioning
 #define GLCD_FONT_CENTER           0    /* Center justification */
 #define GLCD_FONT_RIGHT            1    /* Right justification */
 
@@ -194,7 +197,7 @@ private:
     const uint8_t xoff_mask = 31;
 
     // The end of line character.
-    char const PROGMEM *crlf;
+    char const *crlf;
 
 public:
     //////////////////////////////////////////////////////////////////////////
@@ -280,7 +283,7 @@ public:
     ///
     /// @param [in] s The string to draw from flash memory.
     ///
-    void putstr_P (const char PROGMEM *s);
+    void putstr_P (const char *s);
 
     /////////////////////////////////////////////////////////////////////////
     /// Put a nil terminated string to the screen. The call manages XON and
@@ -290,7 +293,7 @@ public:
     ///
     void putstr (const __FlashStringHelper *s)
     {
-        this->putstr_P ((const char PROGMEM *)s);
+        this->putstr_P ((const char *)s);
     }
 
     /////////////////////////////////////////////////////////////////////////
@@ -337,7 +340,7 @@ public:
     /// @param [in] data The pointer to the data to write.
     /// @param [in] length The length of the data to write in bytes.
     ///
-    void write_P (const uint8_t PROGMEM *data, int length);
+    void write_P (const uint8_t *data, int length);
 
     //////////////////////////////////////////////////////////////////////////
     /// Query the screen for information.
@@ -414,7 +417,7 @@ public:
     };
 
     /////////////////////////////////////////////////////////////////////////
-    /// Change the CRLF behaviour. The value is stored persistantly. 
+    /// Change the CRLF behaviour. The value is stored persistantly.
     ///
     void setCRLF(uint8_t state)
     {
@@ -422,7 +425,7 @@ public:
     };
 
     /////////////////////////////////////////////////////////////////////////
-    /// Change the scroll behaviour. The value is stored persistantly. 
+    /// Change the scroll behaviour. The value is stored persistantly.
     ///
     void setScroll(uint8_t state)
     {
@@ -430,7 +433,7 @@ public:
     };
 
     /////////////////////////////////////////////////////////////////////////
-    /// Change the Xon position. The value is stored persistantly. 
+    /// Change the Xon position. The value is stored persistantly.
     ///
     void setXon(uint8_t position)
     {
@@ -438,7 +441,7 @@ public:
     };
 
     /////////////////////////////////////////////////////////////////////////
-    /// Change the Xoff position. The value is stored persistantly. 
+    /// Change the Xoff position. The value is stored persistantly.
     ///
     void setXoff(uint8_t position)
     {
@@ -526,7 +529,7 @@ public:
     /// string is rendered at the X position modified by the justification
     /// setting and Y position. The call is used for positioning a
     /// proportional font label.
-    /// 
+    ///
     /// @param [in] posX The new x-coordinate position.
     /// @param [in] posY The new y-coordinate position.
     /// @param [in] justification The string justification 0=center, 1=right
@@ -536,7 +539,7 @@ public:
     {
         this->putcmd (GLCD_CMDX_SET_XY_STRING, GLCD_ARG_FFSTRING|3, posX, posY, justification, s);
     };
-    
+
     /////////////////////////////////////////////////////////////////////////
     /// Modify the x and y position for character rendering of a string. The
     /// string is rendered at the X position modified by the justification
@@ -550,10 +553,10 @@ public:
     ///
     void setString(uint8_t posX, uint8_t posY, uint8_t justification, const __FlashStringHelper *s)
     {
-        this->putcmd (GLCD_CMDX_SET_XY_STRING, GLCD_ARG_PROGMEM|GLCD_ARG_FFSTRING|3, 
-                      posX, posY, justification, (const char PROGMEM *)(s));
+        this->putcmd (GLCD_CMDX_SET_XY_STRING, GLCD_ARG_PROGMEM|GLCD_ARG_FFSTRING|3,
+                      posX, posY, justification, (const char *)(s));
     };
-    
+
     /////////////////////////////////////////////////////////////////////////
     /// Modify the x and y position for character rendering of a string. The
     /// string is rendered at the X position modified by the justification
@@ -565,12 +568,12 @@ public:
     /// @param [in] justification The justification position.
     /// @param [in] s A pointer to a nil terminated text string.
     ///
-    void setString_P(uint8_t posX, uint8_t posY, uint8_t justification, const char PROGMEM *s)
+    void setString_P(uint8_t posX, uint8_t posY, uint8_t justification, const char *s)
     {
-        this->putcmd (GLCD_CMDX_SET_XY_STRING, GLCD_ARG_PROGMEM|GLCD_ARG_FFSTRING|3, 
+        this->putcmd (GLCD_CMDX_SET_XY_STRING, GLCD_ARG_PROGMEM|GLCD_ARG_FFSTRING|3,
                       posX, posY, justification, s);
     };
-    
+
     /////////////////////////////////////////////////////////////////////////
     /// Demonstration. Draw the splash screen for the demo. The splash screen
     /// preference determines what is drawn at start up.
@@ -839,7 +842,7 @@ public:
     /// @param [in] id The identity of the sprite to load.
     /// @param [in] sprite A pointer to the sprite in flash memory.
     ///
-    void loadSprite_P (uint8_t id, const uint8_t PROGMEM *sprite)
+    void loadSprite_P (uint8_t id, const uint8_t *sprite)
     {
         this->putcmd (GLCD_CMD_UPLOAD_SPRITE,
                       GLCD_ARG_PROGMEM|GLCD_ARG_SPRITE|1, id, sprite);
@@ -854,7 +857,7 @@ public:
     /// @param [in] sprite_pixels Pointer to sprite pixels in flash memory.
     ///
     void loadSprite_P (uint8_t id, uint8_t width, uint8_t height,
-                       const uint8_t PROGMEM *sprite_pixels)
+                       const uint8_t *sprite_pixels)
     {
         this->putcmd (GLCD_CMD_UPLOAD_SPRITE,
                       GLCD_ARG_PROGMEM|GLCD_ARG_SPRITE_WH|1, id,
@@ -868,7 +871,7 @@ public:
     /// @param [in] length The length of the sprite in bytes.
     /// @param [in] sprite A pointer to the sprite in flash memory.
     ///
-    void loadSprite_P (uint8_t id, int length, const uint8_t PROGMEM *sprite)
+    void loadSprite_P (uint8_t id, int length, const uint8_t *sprite)
     {
         this->putcmd (GLCD_CMD_UPLOAD_SPRITE,
                       GLCD_ARG_SIZEOF|1, id, length, sprite);
@@ -928,7 +931,7 @@ public:
     /// @param [in] sprite A pointer to the sprite in flash memory.
     ///
     void bitblt_P (uint8_t x, uint8_t y, uint8_t mode,
-                   const uint8_t PROGMEM *sprite)
+                   const uint8_t *sprite)
     {
         this->putcmd (GLCD_CMD_BITBLT,
                       GLCD_ARG_PROGMEM|GLCD_ARG_SPRITE|3, x, y, mode, sprite);
@@ -945,7 +948,7 @@ public:
     /// @param [in] sprite A pointer to the sprite pixel data in flash memory.
     ///
     void bitblt_P (uint8_t x, uint8_t y, uint8_t mode, uint8_t width,
-                   uint8_t height, const uint8_t PROGMEM *sprite_pixels)
+                   uint8_t height, const uint8_t *sprite_pixels)
     {
         this->putcmd (GLCD_CMD_BITBLT,
                       GLCD_ARG_PROGMEM|GLCD_ARG_SPRITE_WH|3,
@@ -962,7 +965,7 @@ public:
     /// @param [in] sprite A pointer to the sprite in flash memory.
     ///
     void bitblt_P (uint8_t x, uint8_t y, uint8_t mode,
-                   int length, const uint8_t PROGMEM *sprite)
+                   int length, const uint8_t *sprite)
     {
         this->putcmd (GLCD_CMD_BITBLT, GLCD_ARG_PROGMEM|GLCD_ARG_SIZEOF|3,
                       x, y, mode, length, sprite);
@@ -987,7 +990,7 @@ public:
     /// @param [in] xylist A pointer to a list of (x,y) coordinate pairs. The
     ///                    end of the list is terminated with y|0x80.
     ///
-    void drawPolygon_P (uint8_t mode, const uint8_t PROGMEM *xylist)
+    void drawPolygon_P (uint8_t mode, const uint8_t *xylist)
     {
         this->putcmd (GLCD_CMD_DRAW_POLYGON,
                       GLCD_ARG_PROGMEM|GLCD_ARG_XY_LIST|1, mode, xylist);
@@ -1010,7 +1013,7 @@ public:
     /// @param [in] xylist A pointer to a list of (x,y) coordinate pairs. The
     ///                    end of the list is terminated with y|0x80.
     ///
-    void drawPolygon_P (const uint8_t PROGMEM *xylist)
+    void drawPolygon_P (const uint8_t *xylist)
     {
         this->putcmd (GLCD_CMDX_DRAW_POLYGON,
                       GLCD_ARG_PROGMEM|GLCD_ARG_XY_LIST|0, xylist);
@@ -1036,7 +1039,7 @@ public:
     /// @param [in] xylist A pointer to a list of (x,y) coordinate pairs. The
     ///                    end of the list is terminated with y|0x80.
     ///
-    void drawLines_P (uint8_t mode, const uint8_t PROGMEM *xylist)
+    void drawLines_P (uint8_t mode, const uint8_t *xylist)
     {
         this->putcmd (GLCD_CMD_DRAW_LINES,
                       GLCD_ARG_PROGMEM|GLCD_ARG_XY_LIST|1, mode, xylist);
@@ -1059,7 +1062,7 @@ public:
     /// @param [in] xylist A pointer to a list of (x,y) coordinate pairs. The
     ///                    end of the list is terminated with y|0x80.
     ///
-    void drawLines_P (const uint8_t PROGMEM *xylist)
+    void drawLines_P (const uint8_t *xylist)
     {
         this->putcmd (GLCD_CMDX_DRAW_LINES,
                       GLCD_ARG_PROGMEM|GLCD_ARG_XY_LIST|0, xylist);

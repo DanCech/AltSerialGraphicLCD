@@ -1,28 +1,32 @@
 /* -!- C++ -!- ********************************************* Alternative
  * Graphic Serial LCD Libary Header File
- * 
+ *
  * Parts of this library are based on the original Sparkfun library by:
  *
- * Joel Bartlett 
+ * Joel Bartlett
  * SparkFun Electronics
  * 9-25-13
- * 
- * Jon Green - 205-04-01 
+ *
+ * Jon Green - 2015-04-01
  * New interface and in-line definitions added 2015-04-01 and library
  * re-formatted
- * 
+ *
+ * Dan Cech - 2019-01-07
+ * Removed PROGMEM to support use on ESP8266/ESP32
+ *
+ * Copyright (c) 2019 Dan Cech
  * Copyright (c) 2015 Jon Green
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
  * to deal in the Software without restriction, including without limitation
  * the rights to use, copy, modify, merge, publish, distribute, sublicense,
  * and/or sell copies of the Software, and to permit persons to whom the
  * Software is furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -30,7 +34,7 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
- * 
+ *
  ***************************************************************************/
 
 #include <stdarg.h>
@@ -38,7 +42,7 @@
 #include <SoftwareSerial.h>
 #include "AltSerialGraphicLCD.h"
 
-static char const _crlf[] PROGMEM = "\r\n";
+static char const _crlf[] = "\r\n";
 
 //----------------------------------------------------------------------------
 // Constructor
@@ -151,7 +155,7 @@ GLCD::ready ()
                 startMillis = nowMillis;
         }
     }
-}    
+}
 
 //----------------------------------------------------------------------------
 // Put a character to the screen. Check that we are not blocked.
@@ -170,7 +174,7 @@ GLCD::put (uint8_t cc)
 /// @param [in] s The flash string to print.
 /// const __FlashStringHelper *
 void
-GLCD::putstr_P (const char PROGMEM *s)
+GLCD::putstr_P (const char *s)
 {
     uint8_t cc;
     uint8_t ii = 0;
@@ -227,7 +231,7 @@ GLCD::write (uint8_t *data, int length)
 //----------------------------------------------------------------------------
 // Write a character block from program memory to the screen.
 void
-GLCD::write_P (const uint8_t PROGMEM *data, int length)
+GLCD::write_P (const uint8_t *data, int length)
 {
     // Write out 'length' bytes of data from RAM
     while (length > 0)
@@ -249,11 +253,11 @@ GLCD::putcmd (uint8_t cmd, uint8_t argc, ...)
 {
     // Wait for the screen to be ready.
     this->ready ();
-    
+
     // Check for graphics mode.
     if (graphics_on == 0)
         serial.write (GLCD_CHAR_CMD);
-    
+
     // Push out the command.
     serial.write (cmd);
 
@@ -347,21 +351,21 @@ GLCD::putcmd (uint8_t cmd, uint8_t argc, ...)
             // coordinates terminated with the marker (y & 0x80 != 0)
             else if (argd == GLCD_ARG_XY_LIST)
             {
-                // Handle PROGMEM
+                // Handle
                 if ((argm & GLCD_ARG_PROGMEM) != 0)
                 {
-                    const uint8_t PROGMEM *p;
+                    const uint8_t *p;
 
-                    p = va_arg (ap, const uint8_t PROGMEM *);
+                    p = va_arg (ap, const uint8_t *);
                     do
                     {
                         // Make sure we can write
                         this->ready();
-                        
+
                         // Get x
                         cc = pgm_read_byte (p++);
                         serial.write (cc);
-                        
+
                         // Get y
                         cc = pgm_read_byte (p++);
                         serial.write (cc);
@@ -376,10 +380,10 @@ GLCD::putcmd (uint8_t cmd, uint8_t argc, ...)
                     {
                         // Make sure we can write
                         this->ready();
-                        
+
                         // Get x
                         serial.write (*p++);
-                        
+
                         // Get y
                         cc = *p++;
                         serial.write (cc);
@@ -391,7 +395,7 @@ GLCD::putcmd (uint8_t cmd, uint8_t argc, ...)
             {
                 // Put the string
                 if ((argm & GLCD_ARG_PROGMEM) != 0)
-                    this->putstr_P (va_arg (ap, const char PROGMEM *));
+                    this->putstr_P (va_arg (ap, const char *));
                 else
                     this->putstr (va_arg (ap, char *));
                 // Terminate the string with 0xff
@@ -403,7 +407,7 @@ GLCD::putcmd (uint8_t cmd, uint8_t argc, ...)
             {
                 // Perform a write operation.
                 if ((argm & GLCD_ARG_PROGMEM) != 0)
-                    this->write_P ((const uint8_t PROGMEM *) ptr, length);
+                    this->write_P ((const uint8_t *) ptr, length);
                 else
                     this->write (ptr, length);
             }
