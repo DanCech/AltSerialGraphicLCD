@@ -1,0 +1,39 @@
+# -*- Makefile -*-
+#
+# SunOS Compiler.
+#
+CC          =       cc
+USECC       =       sunos-cc
+CPP         =       $(CC) -E
+CPPFLAGS    =       $(CPP_PLATDEFS) $(LOCALDEFS) $(INCLUDES)
+CDEBUGFLAGS =	    -g  
+#-xO3
+CPROFILEFLAGS=      -p1
+#COPTIMISEFLAGS=	    -xO3 -DNDEBUG=1 -DNTRACE=1 -xstrconst +w2
+C1OPTIMISEFLAGS=    -g -xO1 -DNTRACE=1 -xstrconst 
+C2OPTIMISEFLAGS=    -xO2 -DNDEBUG=1 -DNTRACE=1 -xstrconst 
+CNONOPTIMISEFLAGS=  -g -xO0 -DNTRACE=1 -xstrconst
+COPTIMISEFLAGS =    $(C2OPTIMISEFLAGS)
+CFLAGS =            $(C2OPTIMISEFLAGS)
+#CFLAGS =            $(COPTIMISEFLAGS)
+#
+# GCC Linker
+#
+LD          =   $(CC)
+LD_CFLAGS   =   $(CFLAGS)
+#
+# AR flags
+#
+AR		=	ar
+ARFLAGS		=	-rc
+#
+# YACC Flags
+#
+YACC		=	yacc
+YFLAGS		=	-d
+#
+# File Extensions
+O   = o
+A   = a
+EXE =
+I   = -I

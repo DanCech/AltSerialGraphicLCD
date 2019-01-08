@@ -1,0 +1,36 @@
+# -!- Makefile -!-
+# Directory
+#
+#
+# Base directory names
+# 
+BINDIR		= bin
+LIBDIR		= lib
+INCDIR		= include
+DOCDIR		= doc
+MANDIR		= man
+OBJDIR		= obj
+#
+# Platform base directory names.
+# 
+PLTBINDIR	= $(BINDIR)/$(TARGETDIR)
+PLTLIBDIR	= $(LIBDIR)/$(TARGETDIR)/$(USECC)
+PLTINCDIR	= $(INCDIR)
+PLTDOCDIR	= $(DOCDIR)
+PLTOBJDIR	= $(OBJDIR)/$(TARGETDIR)
+#
+# Install directory names
+# 
+INSTINCDIR=	$(TOPDIR)/$(PLTINCDIR)
+INSTBINDIR=	$(TOPDIR)/$(PLTBINDIR)
+INSTLIBDIR=	$(TOPDIR)/$(PLTLIBDIR)
+INSTDOCDIR=	$(TOPDIR)/$(PLTDOCDIR)
+INSTOBJDIR=	$(TOPDIR)/$(PLTOBJDIR)
+#
+# Release directory names
+# 
+RELINCDIR=	$(RELDIR)/$(INCDIR)
+RELBINDIR=	$(RELDIR)/$(BINDIR)
+RELLIBDIR=	$(RELDIR)/$(TARGETDIR)/$(USECC)
+RELDOCDIR=	$(RELDIR)/$(DOCDIR)
+RELMANDIR=	$(RELDIR)/$(MANDIR)

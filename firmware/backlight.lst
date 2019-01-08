@@ -1,0 +1,291 @@
+   1               		.file	"backlight.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               	.global	backlight_init
+  12               	backlight_init:
+  13               	.LFB11:
+  14               		.file 1 "backlight.c"
+   1:backlight.c   **** /* -*- c++ -*- ***************************************************************
+   2:backlight.c   ****  *
+   3:backlight.c   ****  *  System      : Serial GLCD
+   4:backlight.c   ****  *  Module      : Backlight handling
+   5:backlight.c   ****  *  Object Name : $RCSfile: backlight.c,v $
+   6:backlight.c   ****  *  Revision    : $Revision: 1.9 $
+   7:backlight.c   ****  *  Date        : $Date: 2015/05/31 19:12:12 $
+   8:backlight.c   ****  *  Author      : $Author: jon $
+   9:backlight.c   ****  *  Created By  : Jon Green
+  10:backlight.c   ****  *  Created     : Sun Apr 5 08:43:33 2015 Last Modified : <150530.1110>
+  11:backlight.c   ****  *
+  12:backlight.c   ****  *  Description : Handles the backlight function
+  13:backlight.c   ****  *
+  14:backlight.c   ****  *  Notes       : Derrived from the code by Jennifer Holt and adapted for the
+  15:backlight.c   ****  *               160x128 screen. The backlight timer code was lifted from Mike
+  16:backlight.c   ****  *               Hord, Sparkfun which uses a neat trick with the timers that
+  17:backlight.c   ****  *               I struggle to understand but it seems to work nicely.
+  18:backlight.c   ****  *
+  19:backlight.c   ****  *  History     :
+  20:backlight.c   ****  *
+  21:backlight.c   ****  *****************************************************************************
+  22:backlight.c   ****  *
+  23:backlight.c   ****  *  02 May 2013 - Mike Hord, SparkFun Electronics
+  24:backlight.c   ****  *
+  25:backlight.c   ****  * This code is released under the Creative Commons Attribution Share-Alike 3.0
+  26:backlight.c   ****  * license. You are free to reuse, remix, or redistribute it as you see fit,
+  27:backlight.c   ****  * so long as you provide attribution to SparkFun Electronics.
+  28:backlight.c   ****  *
+  29:backlight.c   ****  *  Copyright (c) 2010 Jennifer Holt
+  30:backlight.c   ****  *  Copyright (c) 2015 Jon Green
+  31:backlight.c   ****  *
+  32:backlight.c   ****  *  Permission is hereby granted, free of charge, to any person obtaining a
+  33:backlight.c   ****  *  copy of this software and associated documentation files (the "Software"),
+  34:backlight.c   ****  *  to deal in the Software without restriction, including without limitation
+  35:backlight.c   ****  *  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+  36:backlight.c   ****  *  and/or sell copies of the Software, and to permit persons to whom the
+  37:backlight.c   ****  *  Software is furnished to do so, subject to the following conditions:
+  38:backlight.c   ****  *
+  39:backlight.c   ****  *  The above copyright notice and this permission notice shall be included in
+  40:backlight.c   ****  *  all copies or substantial portions of the Software.
+  41:backlight.c   ****  *
+  42:backlight.c   ****  *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  43:backlight.c   ****  *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  44:backlight.c   ****  *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+  45:backlight.c   ****  *  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  46:backlight.c   ****  *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+  47:backlight.c   ****  *  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+  48:backlight.c   ****  *  DEALINGS IN THE SOFTWARE.
+  49:backlight.c   ****  *
+  50:backlight.c   ****  ****************************************************************************/
+  51:backlight.c   **** 
+  52:backlight.c   **** #include <stdlib.h>
+  53:backlight.c   **** #include <avr/pgmspace.h>
+  54:backlight.c   **** #include <avr/interrupt.h>
+  55:backlight.c   **** #include <avr/boot.h>
+  56:backlight.c   **** #include <avr/io.h>
+  57:backlight.c   **** 
+  58:backlight.c   **** #include "glcd.h"
+  59:backlight.c   **** 
+  60:backlight.c   **** // PB2 is backlight enable, and is active low
+  61:backlight.c   **** #define nBL_EN  2
+  62:backlight.c   **** 
+  63:backlight.c   **** //////////////////////////////////////////////////////////////////////////////
+  64:backlight.c   **** ///
+  65:backlight.c   **** /// Initialise the backlight hardware.
+  66:backlight.c   **** ///
+  67:backlight.c   **** void
+  68:backlight.c   **** backlight_init (void)
+  69:backlight.c   **** {
+  15               		.loc 1 69 0
+  16               		.cfi_startproc
+  17               	/* prologue: function */
+  18               	/* frame size = 0 */
+  19               	/* stack size = 0 */
+  20               	.L__stack_usage = 0
+  70:backlight.c   ****     // Turn the backlight of
+  71:backlight.c   ****     PORTB |= 1 << nBL_EN;               // Set backlight off.
+  21               		.loc 1 71 0
+  22 0000 2A9A      		sbi 0x5,2
+  72:backlight.c   ****     DDRB  |= 1 << nBL_EN;               // Set PB2 as output
+  23               		.loc 1 72 0
+  24 0002 229A      		sbi 0x4,2
+  25 0004 0895      		ret
+  26               		.cfi_endproc
+  27               	.LFE11:
+  29               	.global	backlight_level
+  31               	backlight_level:
+  32               	.LFB12:
+  73:backlight.c   **** }
+  74:backlight.c   **** 
+  75:backlight.c   **** //////////////////////////////////////////////////////////////////////////////
+  76:backlight.c   **** ///
+  77:backlight.c   **** /// Change the backlight level.
+  78:backlight.c   **** ///
+  79:backlight.c   **** /// @param [in] level A value between 0 and 100 where 0 is off, 100 is
+  80:backlight.c   **** ///                   the brightest level.
+  81:backlight.c   **** /// @param [in] cmd   The command that we are executing. If it is a
+  82:backlight.c   **** ///                   CMD_SET_BACKLIGHT then save to EEPROM.
+  83:backlight.c   **** ///
+  84:backlight.c   **** /// @return The current level.
+  85:backlight.c   **** ///
+  86:backlight.c   **** uint8_t
+  87:backlight.c   **** backlight_level (uint8_t level, uint8_t cmd)
+  88:backlight.c   **** {
+  33               		.loc 1 88 0
+  34               		.cfi_startproc
+  35               	.LVL0:
+  36 0006 CF93      		push r28
+  37               	.LCFI0:
+  38               		.cfi_def_cfa_offset 3
+  39               		.cfi_offset 28, -2
+  40               	/* prologue: function */
+  41               	/* frame size = 0 */
+  42               	/* stack size = 1 */
+  43               	.L__stack_usage = 1
+  44 0008 C82F      		mov r28,r24
+  89:backlight.c   ****     // Accept the new value and make sure it is in a valid range.
+  90:backlight.c   ****     if (level > 100)
+  45               		.loc 1 90 0
+  46 000a 8536      		cpi r24,lo8(101)
+  47 000c 00F4      		brsh .L3
+  91:backlight.c   ****         level = 100;
+  92:backlight.c   **** 
+  93:backlight.c   ****     // Full brightness
+  94:backlight.c   ****     if (level >= 100)
+  48               		.loc 1 94 0
+  49 000e 8436      		cpi r24,lo8(100)
+  50 0010 01F4      		brne .L4
+  51               	.L3:
+  52               	.LVL1:
+  95:backlight.c   ****     {
+  96:backlight.c   ****         // Disable Timer1
+  97:backlight.c   ****         TCCR1A = 0;
+  53               		.loc 1 97 0
+  54 0012 1092 8000 		sts 128,__zero_reg__
+  98:backlight.c   ****         TCCR1B = 0;
+  55               		.loc 1 98 0
+  56 0016 1092 8100 		sts 129,__zero_reg__
+  99:backlight.c   **** 
+ 100:backlight.c   ****         // Turn backlight on
+ 101:backlight.c   ****         PORTB &= ~(1 << nBL_EN);
+  57               		.loc 1 101 0
+  58 001a 2A98      		cbi 0x5,2
+  59 001c C4E6      		ldi r28,lo8(100)
+  60 001e 00C0      		rjmp .L5
+  61               	.LVL2:
+  62               	.L4:
+ 102:backlight.c   ****     }
+ 103:backlight.c   ****     // Turn backlight off
+ 104:backlight.c   ****     else if (level == 0)
+  63               		.loc 1 104 0
+  64 0020 8111      		cpse r24,__zero_reg__
+  65 0022 00C0      		rjmp .L6
+ 105:backlight.c   ****     {
+ 106:backlight.c   ****         // Disable Timer1
+ 107:backlight.c   ****         TCCR1A = 0;
+  66               		.loc 1 107 0
+  67 0024 1092 8000 		sts 128,__zero_reg__
+ 108:backlight.c   ****         TCCR1B = 0;
+  68               		.loc 1 108 0
+  69 0028 1092 8100 		sts 129,__zero_reg__
+ 109:backlight.c   **** 
+ 110:backlight.c   ****         // Set the backlight off
+ 111:backlight.c   ****         PORTB |= 1 << nBL_EN;
+  70               		.loc 1 111 0
+  71 002c 2A9A      		sbi 0x5,2
+  72 002e 00C0      		rjmp .L5
+  73               	.L6:
+ 112:backlight.c   ****     }
+ 113:backlight.c   ****     // Some setting in the middle.
+ 114:backlight.c   ****     else
+ 115:backlight.c   ****     {
+ 116:backlight.c   ****         // Backlight on
+ 117:backlight.c   ****         PORTB &= ~(1 << nBL_EN);
+  74               		.loc 1 117 0
+  75 0030 2A98      		cbi 0x5,2
+ 118:backlight.c   **** 
+ 119:backlight.c   ****         // Timer1 initialization
+ 120:backlight.c   ****         // We use timer 1 fast PWM mode to dim the backlight on the display.
+ 121:backlight.c   ****         // OC1B (PB2) is connected to a BJT for controlling the backlight; the
+ 122:backlight.c   ****         // BJT is PNP so we want to use inverting mode.
+ 123:backlight.c   ****         //
+ 124:backlight.c   ****         // PWM frequency is fclk/(N*(1+TOP)), where TOP is, in this case 100,
+ 125:backlight.c   ****         // N=1, and fclk is 16MHz. Thus, Fpwm ~ 160kHz.
+ 126:backlight.c   ****         //
+ 127:backlight.c   ****         // TCCR1A-  7:6 - Channel A compare output mode
+ 128:backlight.c   ****         //                 Set to 00 for normal pin operation
+ 129:backlight.c   ****         //          5:4 - Channel B compare output mode
+ 130:backlight.c   ****         //                 Set to 01 for inverting PWM output mode
+ 131:backlight.c   ****         //          3:2 - Don't care/no use
+ 132:backlight.c   ****         //          1:0 - Waveform generation mode bits 1:0
+ 133:backlight.c   ****         //                 Along with WGM1 3:2 (In TCCR1B), set to 1111 to enable
+ 134:backlight.c   ****         //                 fast PWM mode. TCNT1 will increment until it reaches ICR1,
+ 135:backlight.c   ****         //                 then reset, and the pin will change when TCNT1 == 0 and
+ 136:backlight.c   ****         //                 when TCNT1 == OCR1B.
+ 137:backlight.c   ****         TCCR1A = 0b00110010;
+  76               		.loc 1 137 0
+  77 0032 82E3      		ldi r24,lo8(50)
+  78               	.LVL3:
+  79 0034 8093 8000 		sts 128,r24
+ 138:backlight.c   **** 
+ 139:backlight.c   ****         // TCCR1B-  7   - Input noise canceler (Don't care)
+ 140:backlight.c   ****         //          6   - Input capture edge select (Don't care)
+ 141:backlight.c   ****         //          5   - Don't care/no use
+ 142:backlight.c   ****         //          4:3 - Waveform generation mode bits 3:2
+ 143:backlight.c   ****         //                 See above; set to 11 for fast PWM
+ 144:backlight.c   ****         //          2:0 - Timer 1 clock source
+ 145:backlight.c   ****         //                 Set to 001 for no clock divisor.
+ 146:backlight.c   ****         TCCR1B = 0b00011001;
+  80               		.loc 1 146 0
+  81 0038 89E1      		ldi r24,lo8(25)
+  82 003a 8093 8100 		sts 129,r24
+ 147:backlight.c   **** 
+ 148:backlight.c   ****         // ICR1- Really implemented as two 8-bit registers (ICR1L and ICR1H), the
+ 149:backlight.c   ****         // value in this register (in this mode) marks the point at which the
+ 150:backlight.c   ****         // timer quits counting and returns to zero. By making it 100, we can
+ 151:backlight.c   ****         // then really easily set our backlight intensity from 0-100.
+ 152:backlight.c   ****         ICR1 = 100;
+  83               		.loc 1 152 0
+  84 003e 24E6      		ldi r18,lo8(100)
+  85 0040 30E0      		ldi r19,0
+  86 0042 3093 8700 		sts 134+1,r19
+  87 0046 2093 8600 		sts 134,r18
+ 153:backlight.c   **** 
+ 154:backlight.c   ****         // OCR1B- Really implemented as two 8-bit registers (OCR1BL and OCR1BH),
+ 155:backlight.c   ****         // the value in this register is the point where the output pin will
+ 156:backlight.c   ****         // transition from low to high, turning the backlight off.
+ 157:backlight.c   ****         OCR1B = level;
+  88               		.loc 1 157 0
+  89 004a 2C2F      		mov r18,r28
+  90 004c 30E0      		ldi r19,0
+  91 004e 3093 8B00 		sts 138+1,r19
+  92 0052 2093 8A00 		sts 138,r18
+  93               	.LVL4:
+  94               	.L5:
+ 158:backlight.c   ****     }
+ 159:backlight.c   **** 
+ 160:backlight.c   ****     // Save the setting if required.
+ 161:backlight.c   ****     if (cmd == CMD_SET_BACKLIGHT)
+  95               		.loc 1 161 0
+  96 0056 6230      		cpi r22,lo8(2)
+  97 0058 01F4      		brne .L7
+ 162:backlight.c   ****         lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_BACKLIGHT, level);
+  98               		.loc 1 162 0
+  99 005a 4C2F      		mov r20,r28
+ 100 005c 85EC      		ldi r24,lo8(-59)
+ 101 005e 0E94 0000 		call lcd_set
+ 102               	.LVL5:
+ 103               	.L7:
+ 163:backlight.c   **** 
+ 164:backlight.c   ****     // Return the level to the caller.
+ 165:backlight.c   ****     return level;
+ 166:backlight.c   **** }
+ 104               		.loc 1 166 0
+ 105 0062 8C2F      		mov r24,r28
+ 106               	/* epilogue start */
+ 107 0064 CF91      		pop r28
+ 108 0066 0895      		ret
+ 109               		.cfi_endproc
+ 110               	.LFE12:
+ 112               		.comm	line_buffer,16,1
+ 113               	.Letext0:
+ 114               		.file 2 "/usr/local/CrossPack-AVR-20131216/avr/include/stdint.h"
+ 115               		.file 3 "glcd.h"
+DEFINED SYMBOLS
+                            *ABS*:00000000 backlight.c
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccUjI2fA.s:2      *ABS*:0000003e __SP_H__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccUjI2fA.s:3      *ABS*:0000003d __SP_L__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccUjI2fA.s:4      *ABS*:0000003f __SREG__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccUjI2fA.s:5      *ABS*:00000000 __tmp_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccUjI2fA.s:6      *ABS*:00000001 __zero_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccUjI2fA.s:12     .text:00000000 backlight_init
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccUjI2fA.s:31     .text:00000006 backlight_level
+                            *COM*:00000010 line_buffer
+
+UNDEFINED SYMBOLS
+lcd_set
+__do_clear_bss

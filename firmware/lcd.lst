@@ -1,0 +1,1606 @@
+   1               		.file	"lcd.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               	.global	lcd_reset
+  12               	lcd_reset:
+  13               	.LFB11:
+  14               		.file 1 "lcd.c"
+   1:lcd.c         **** /* -*- c++ -*- ***************************************************************
+   2:lcd.c         ****  *
+   3:lcd.c         ****  *  System        : Serial GLCD
+   4:lcd.c         ****  *  Module        : Font Handling
+   5:lcd.c         ****  *  Object Name   : $RCSfile: lcd.c,v $
+   6:lcd.c         ****  *  Revision      : $Revision: 1.18 $
+   7:lcd.c         ****  *  Date          : $Date: 2015/07/05 21:07:37 $
+   8:lcd.c         ****  *  Author        : $Author: jon $
+   9:lcd.c         ****  *  Created By    : Jon Green
+  10:lcd.c         ****  *  Created       : Sun Apr 5 08:43:33 2015
+  11:lcd.c         ****  *  Last Modified : <150612.2256>
+  12:lcd.c         ****  *
+  13:lcd.c         ****  *  Description   : Handles all of the font related
+  14:lcd.c         ****  *
+  15:lcd.c         ****  *  Notes         :
+  16:lcd.c         ****  *
+  17:lcd.c         ****  *  History     : Derrived from the code by Sparkfun and Jennifer Holt and
+  18:lcd.c         ****  *                adapted for the 160x128 screen.
+  19:lcd.c         ****  *
+  20:lcd.c         ****  *****************************************************************************/
+  21:lcd.c         **** 
+  22:lcd.c         **** /*****************************************************************************
+  23:lcd.c         ****  *
+  24:lcd.c         ****  *  Copyright (c) 2010 Jennifer Holt
+  25:lcd.c         ****  *  Copyright (c) 2015 Jon Green
+  26:lcd.c         ****  *
+  27:lcd.c         ****  *  Permission is hereby granted, free of charge, to any person obtaining a
+  28:lcd.c         ****  *  copy of this software and associated documentation files (the "Software"),
+  29:lcd.c         ****  *  to deal in the Software without restriction, including without limitation
+  30:lcd.c         ****  *  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+  31:lcd.c         ****  *  and/or sell copies of the Software, and to permit persons to whom the
+  32:lcd.c         ****  *  Software is furnished to do so, subject to the following conditions:
+  33:lcd.c         ****  *
+  34:lcd.c         ****  *  The above copyright notice and this permission notice shall be included in
+  35:lcd.c         ****  *  all copies or substantial portions of the Software.
+  36:lcd.c         ****  *
+  37:lcd.c         ****  *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  38:lcd.c         ****  *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  39:lcd.c         ****  *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+  40:lcd.c         ****  *  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  41:lcd.c         ****  *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+  42:lcd.c         ****  *  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+  43:lcd.c         ****  *  DEALINGS IN THE SOFTWARE.
+  44:lcd.c         ****  *
+  45:lcd.c         ****  ****************************************************************************/
+  46:lcd.c         **** 
+  47:lcd.c         **** #include <stdlib.h>
+  48:lcd.c         **** #include <string.h>
+  49:lcd.c         **** 
+  50:lcd.c         **** #include <avr/pgmspace.h>
+  51:lcd.c         **** #include <avr/interrupt.h>
+  52:lcd.c         **** #include <avr/eeprom.h>
+  53:lcd.c         **** #include <avr/boot.h>
+  54:lcd.c         **** #include <avr/wdt.h>                    /* Watchdog timer */
+  55:lcd.c         **** #include <avr/io.h>
+  56:lcd.c         **** 
+  57:lcd.c         **** #include "glcd.h"
+  58:lcd.c         **** 
+  59:lcd.c         **** //////////////////////////////////////////////////////////////////////////////
+  60:lcd.c         **** /// Perform a reset of the screen
+  61:lcd.c         **** ///
+  62:lcd.c         **** void
+  63:lcd.c         **** lcd_reset (void)
+  64:lcd.c         **** {
+  15               		.loc 1 64 0
+  16               		.cfi_startproc
+  17               	/* prologue: function */
+  18               	/* frame size = 0 */
+  19               	/* stack size = 0 */
+  20               	.L__stack_usage = 0
+  65:lcd.c         ****     // Change the watchdog timer for a short period and then allow the
+  66:lcd.c         ****     // processor to reset.
+  67:lcd.c         ****     cli();                              // Disable interrupts
+  21               		.loc 1 67 0
+  22               	/* #APP */
+  23               	 ;  67 "lcd.c" 1
+  24 0000 F894      		cli
+  25               	 ;  0 "" 2
+  68:lcd.c         **** 
+  69:lcd.c         ****     /* WDTCSR configuration:
+  70:lcd.c         ****      * WDIE = 1 - Interrupt Enable
+  71:lcd.c         ****      * WDE =  1 - Reset Enable
+  72:lcd.c         ****      * See table for time-out variations:
+  73:lcd.c         ****      *@+-----+-----+-----+-----+--------------+
+  74:lcd.c         ****      * |WDP 3|WDP 2|WDP 1|WDP 0|Time-out (ms) |
+  75:lcd.c         ****      * +-----+-----+-----+-----+--------------+
+  76:lcd.c         ****      * |  0  |  0  |  0  |  0  |    16        |
+  77:lcd.c         ****      * |  0  |  0  |  0  |  1  |    32        |
+  78:lcd.c         ****      * |  0  |  0  |  1  |  0  |    64        |
+  79:lcd.c         ****      * |  0  |  0  |  1  |  1  |   125        |
+  80:lcd.c         ****      * |  0  |  1  |  0  |  0  |   250        |
+  81:lcd.c         ****      * |  0  |  1  |  0  |  1  |   500        |
+  82:lcd.c         ****      * |  0  |  1  |  1  |  0  |  1000        |
+  83:lcd.c         ****      * |  0  |  1  |  1  |  1  |  2000        |
+  84:lcd.c         ****      * |  1  |  0  |  0  |  0  |  4000        |
+  85:lcd.c         ****      * |  1  |  0  |  0  |  1  |  8000        |
+  86:lcd.c         ****      * +-----+-----+-----+-----+--------------+
+  87:lcd.c         ****      */
+  88:lcd.c         **** 
+  89:lcd.c         ****     // Enter Watchdog Configuration mode
+  90:lcd.c         ****     WDTCSR |= (1 << WDCE) | (1 << WDE);
+  26               		.loc 1 90 0
+  27               	/* #NOAPP */
+  28 0002 8091 6000 		lds r24,96
+  29 0006 8861      		ori r24,lo8(24)
+  30 0008 8093 6000 		sts 96,r24
+  91:lcd.c         ****     // Set Watchdog settings
+  92:lcd.c         ****     WDTCSR = ((1 << WDIE)|(1 << WDE)|(0 << WDP3)|(0 << WDP2)|(1 << WDP1)|(0 << WDP0));
+  31               		.loc 1 92 0
+  32 000c 8AE4      		ldi r24,lo8(74)
+  33 000e 8093 6000 		sts 96,r24
+  93:lcd.c         ****     // Enable interrupts
+  94:lcd.c         ****     sei();
+  34               		.loc 1 94 0
+  35               	/* #APP */
+  36               	 ;  94 "lcd.c" 1
+  37 0012 7894      		sei
+  38               	 ;  0 "" 2
+  39               	/* #NOAPP */
+  40               	.L2:
+  41 0014 00C0      		rjmp .L2
+  42               		.cfi_endproc
+  43               	.LFE11:
+  45               	.global	lcd_screen_clear
+  47               	lcd_screen_clear:
+  48               	.LFB12:
+  95:lcd.c         **** 
+  96:lcd.c         ****     // Spin until we reset on the watchdog.
+  97:lcd.c         ****     for(;;)
+  98:lcd.c         ****         ;
+  99:lcd.c         **** 
+ 100:lcd.c         ****     // NO EXIT - THE WATCHDOG WILL RESTART THE PROCESSOR
+ 101:lcd.c         **** }
+ 102:lcd.c         **** 
+ 103:lcd.c         **** //////////////////////////////////////////////////////////////////////////////
+ 104:lcd.c         **** /// Clear the screen
+ 105:lcd.c         **** ///
+ 106:lcd.c         **** void
+ 107:lcd.c         **** lcd_screen_clear (void)
+ 108:lcd.c         **** {
+  49               		.loc 1 108 0
+  50               		.cfi_startproc
+  51               	/* prologue: function */
+  52               	/* frame size = 0 */
+  53               	/* stack size = 0 */
+  54               	.L__stack_usage = 0
+  55               	.LBB5:
+ 109:lcd.c         ****     // Invoke the screen driver to clear the screen with the reverse
+ 110:lcd.c         ****     // preference which will redraw the screen in the normal/reverse mode.
+ 111:lcd.c         ****     ((vfunc_i_t)(pgm_read_word(&functabP [F_DRV_SCREEN_CLEAR])))(prefs_reverse);
+  56               		.loc 1 111 0
+  57 0016 E091 0000 		lds r30,functabP
+  58 001a F091 0000 		lds r31,functabP+1
+  59 001e 3496      		adiw r30,4
+  60               	.LVL0:
+  61               	/* #APP */
+  62               	 ;  111 "lcd.c" 1
+  63 0020 2591      		lpm r18, Z+
+  64 0022 3491      		lpm r19, Z
+  65               		
+  66               	 ;  0 "" 2
+  67               	.LVL1:
+  68               	/* #NOAPP */
+  69               	.LBE5:
+  70 0024 8091 0000 		lds r24,prefs+4
+  71 0028 F901      		movw r30,r18
+  72 002a 0995      		icall
+  73               	.LVL2:
+ 112:lcd.c         ****     font_position (0, 0, 0);
+  74               		.loc 1 112 0
+  75 002c 40E0      		ldi r20,0
+  76 002e 60E0      		ldi r22,0
+  77 0030 80E0      		ldi r24,0
+  78 0032 0C94 0000 		jmp font_position
+  79               	.LVL3:
+  80               		.cfi_endproc
+  81               	.LFE12:
+  83               	.global	lcd_factory_reset
+  85               	lcd_factory_reset:
+  86               	.LFB13:
+ 113:lcd.c         **** }
+ 114:lcd.c         **** 
+ 115:lcd.c         **** //////////////////////////////////////////////////////////////////////////////
+ 116:lcd.c         **** /// Perform a factory reset on EEPROM.
+ 117:lcd.c         **** ///
+ 118:lcd.c         **** void
+ 119:lcd.c         **** lcd_factory_reset (void)
+ 120:lcd.c         **** {
+  87               		.loc 1 120 0
+  88               		.cfi_startproc
+  89 0036 0F93      		push r16
+  90               	.LCFI0:
+  91               		.cfi_def_cfa_offset 3
+  92               		.cfi_offset 16, -2
+  93 0038 1F93      		push r17
+  94               	.LCFI1:
+  95               		.cfi_def_cfa_offset 4
+  96               		.cfi_offset 17, -3
+  97 003a CF93      		push r28
+  98               	.LCFI2:
+  99               		.cfi_def_cfa_offset 5
+ 100               		.cfi_offset 28, -4
+ 101 003c DF93      		push r29
+ 102               	.LCFI3:
+ 103               		.cfi_def_cfa_offset 6
+ 104               		.cfi_offset 29, -5
+ 105               	/* prologue: function */
+ 106               	/* frame size = 0 */
+ 107               	/* stack size = 4 */
+ 108               	.L__stack_usage = 4
+ 121:lcd.c         ****     int ii;                             // Loop pointer
+ 122:lcd.c         ****     uint8_t *ptr;                       // Memory pointer
+ 123:lcd.c         **** 
+ 124:lcd.c         ****     // Define the Sparkfun logo.
+ 125:lcd.c         ****     static const uint8_t sparkfun_logo [] PROGMEM =
+ 126:lcd.c         ****     {
+ 127:lcd.c         ****         0x0A,0x10,                      // Width x height
+ 128:lcd.c         ****         0x80,0xc0,0x40,0x0c,0x3e,0xfe,0xf2,0xe0,0xf0,0xe0,
+ 129:lcd.c         ****         0xff,0x7f,0x3f,0x1f,0x1f,0x1f,0x1f,0x0f,0x07,0x03
+ 130:lcd.c         ****     };
+ 131:lcd.c         **** 
+ 132:lcd.c         ****     // Reset the EEPROM to its factory default setting.
+ 133:lcd.c         ****     memset (prefs, 0, sizeof (prefs));  // Reset everything to zero.
+ 109               		.loc 1 133 0
+ 110 003e 8DE0      		ldi r24,lo8(13)
+ 111 0040 E0E0      		ldi r30,lo8(prefs)
+ 112 0042 F0E0      		ldi r31,hi8(prefs)
+ 113 0044 DF01      		movw r26,r30
+ 114               		0:
+ 115 0046 1D92      		st X+,__zero_reg__
+ 116 0048 8A95      		dec r24
+ 117 004a 01F4      		brne 0b
+ 134:lcd.c         **** 
+ 135:lcd.c         ****     // Set magic number to indicate we have written memory
+ 136:lcd.c         ****     prefs [EEPROM_ADDR_MAGIC] = EEPROM_MAGIC;
+ 118               		.loc 1 136 0
+ 119 004c 85ED      		ldi r24,lo8(-43)
+ 120 004e 8093 0000 		sts prefs,r24
+ 137:lcd.c         ****     // Set default baud rate.
+ 138:lcd.c         ****     prefs_baudrate = BAUD_RATE_DEFAULT;
+ 121               		.loc 1 138 0
+ 122 0052 86E0      		ldi r24,lo8(6)
+ 123 0054 8093 0000 		sts prefs+1,r24
+ 139:lcd.c         ****     // Assume normal mode operation.
+ 140:lcd.c         ****     prefs_reverse = MODE_NORMAL;
+ 124               		.loc 1 140 0
+ 125 0058 81E0      		ldi r24,lo8(1)
+ 126 005a 8093 0000 		sts prefs+4,r24
+ 141:lcd.c         ****     // Set the backlight to full
+ 142:lcd.c         ****     prefs_backlight = 100;
+ 127               		.loc 1 142 0
+ 128 005e 94E6      		ldi r25,lo8(100)
+ 129 0060 9093 0000 		sts prefs+2,r25
+ 143:lcd.c         ****     // Set the splash screen on
+ 144:lcd.c         ****     prefs_splash = 1;
+ 130               		.loc 1 144 0
+ 131 0064 8093 0000 		sts prefs+3,r24
+ 145:lcd.c         ****     // Set the XON/XOFF preferences
+ 146:lcd.c         ****     prefs_xon = RX_BUFFER_XON;
+ 132               		.loc 1 146 0
+ 133 0068 84E1      		ldi r24,lo8(20)
+ 134 006a 8093 0000 		sts prefs+7,r24
+ 147:lcd.c         ****     prefs_xoff = RX_BUFFER_XOFF;
+ 135               		.loc 1 147 0
+ 136 006e 86EA      		ldi r24,lo8(-90)
+ 137 0070 8093 0000 		sts prefs+8,r24
+ 148:lcd.c         ****     
+ 149:lcd.c         ****     // Read the PINB screen configuration
+ 150:lcd.c         ****     // The first thing to do is to check is if we have a large or small
+ 151:lcd.c         ****     // display. We can tell because PB3 will be pulled high if the display is
+ 152:lcd.c         ****     // large (hopefully; that's done at build time). The default
+ 153:lcd.c         ****     // configuration is set up for the large display so we only need to
+ 154:lcd.c         ****     // change the configuration if it is a small display.
+ 155:lcd.c         ****     // 
+ 156:lcd.c         ****     // The line needs some time to settle once we have enabled it. We enable
+ 157:lcd.c         ****     // the line now and then do some work while it settles and then come back
+ 158:lcd.c         ****     // and read it. 
+ 159:lcd.c         ****     PORTB |= 0x08;                      // Enable the pull-up on PB3.
+ 138               		.loc 1 159 0
+ 139 0074 2B9A      		sbi 0x5,3
+ 140               	.LVL4:
+ 141               	.LBB6:
+ 142               	.LBB7:
+ 143               		.file 2 "/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h"
+   1:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /* Copyright (c) 2002, Marek Michalkiewicz
+   2:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Copyright (c) 2004,2005,2007 Joerg Wunsch
+   3:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Copyright (c) 2007  Florin-Viorel Petrov
+   4:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    All rights reserved.
+   5:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+   6:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Redistribution and use in source and binary forms, with or without
+   7:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    modification, are permitted provided that the following conditions are met:
+   8:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+   9:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    * Redistributions of source code must retain the above copyright
+  10:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      notice, this list of conditions and the following disclaimer.
+  11:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  12:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    * Redistributions in binary form must reproduce the above copyright
+  13:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      notice, this list of conditions and the following disclaimer in
+  14:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      the documentation and/or other materials provided with the
+  15:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      distribution.
+  16:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  17:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    * Neither the name of the copyright holders nor the names of
+  18:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      contributors may be used to endorse or promote products derived
+  19:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      from this software without specific prior written permission.
+  20:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  21:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  22:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  23:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  24:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+  25:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  26:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  27:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  28:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  29:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  30:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  31:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   POSSIBILITY OF SUCH DAMAGE. */
+  32:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  33:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /* $Id$ */
+  34:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  35:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #ifndef _UTIL_DELAY_H_
+  36:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #define _UTIL_DELAY_H_ 1
+  37:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  38:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #ifndef __HAS_DELAY_CYCLES
+  39:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #define __HAS_DELAY_CYCLES 1
+  40:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+  41:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  42:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #include <inttypes.h>
+  43:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #include <util/delay_basic.h>
+  44:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #include <math.h>
+  45:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  46:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /** \file */
+  47:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /** \defgroup util_delay <util/delay.h>: Convenience functions for busy-wait delay loops
+  48:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     \code
+  49:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     #define F_CPU 1000000UL  // 1 MHz
+  50:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     //#define F_CPU 14.7456E6
+  51:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     #include <util/delay.h>
+  52:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     \endcode
+  53:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  54:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     \note As an alternative method, it is possible to pass the
+  55:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     F_CPU macro down to the compiler from the Makefile.
+  56:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     Obviously, in that case, no \c \#define statement should be
+  57:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     used.
+  58:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  59:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     The functions in this header file are wrappers around the basic
+  60:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     busy-wait functions from <util/delay_basic.h>.  They are meant as
+  61:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     convenience functions where actual time values can be specified
+  62:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     rather than a number of cycles to wait for.  The idea behind is
+  63:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     that compile-time constant expressions will be eliminated by
+  64:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     compiler optimization so floating-point expressions can be used
+  65:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     to calculate the number of delay cycles needed based on the CPU
+  66:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     frequency passed by the macro F_CPU.
+  67:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  68:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     \note In order for these functions to work as intended, compiler
+  69:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     optimizations <em>must</em> be enabled, and the delay time
+  70:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     <em>must</em> be an expression that is a known constant at
+  71:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     compile-time.  If these requirements are not met, the resulting
+  72:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     delay will be much longer (and basically unpredictable), and
+  73:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     applications that otherwise do not use floating-point calculations
+  74:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     will experience severe code bloat by the floating-point library
+  75:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     routines linked into the application.
+  76:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  77:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     The functions available allow the specification of microsecond, and
+  78:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     millisecond delays directly, using the application-supplied macro
+  79:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     F_CPU as the CPU clock frequency (in Hertz).
+  80:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  81:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** */
+  82:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  83:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #if !defined(__DOXYGEN__)
+  84:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** static inline void _delay_us(double __us) __attribute__((always_inline));
+  85:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** static inline void _delay_ms(double __ms) __attribute__((always_inline));
+  86:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+  87:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  88:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #ifndef F_CPU
+  89:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /* prevent compiler error by supplying a default */
+  90:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** # warning "F_CPU not defined for <util/delay.h>"
+  91:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** # define F_CPU 1000000UL
+  92:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+  93:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  94:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #ifndef __OPTIMIZE__
+  95:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** # warning "Compiler optimizations disabled; functions from <util/delay.h> won't work as designed"
+  96:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+  97:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  98:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+  99:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 100:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 101:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #  include <math.h>
+ 102:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+ 103:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 104:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /**
+ 105:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    \ingroup util_delay
+ 106:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 107:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Perform a delay of \c __ms milliseconds, using _delay_loop_2().
+ 108:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 109:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    The macro F_CPU is supposed to be defined to a
+ 110:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    constant defining the CPU clock frequency (in Hertz).
+ 111:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 112:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    The maximal possible delay is 262.14 ms / F_CPU in MHz.
+ 113:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 114:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    When the user request delay which exceed the maximum possible one,
+ 115:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    _delay_ms() provides a decreased resolution functionality. In this
+ 116:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    mode _delay_ms() will work with a resolution of 1/10 ms, providing
+ 117:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    delays up to 6.5535 seconds (independent from CPU frequency).  The
+ 118:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    user will not be informed about decreased resolution.
+ 119:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 120:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    If the avr-gcc toolchain has __builtin_avr_delay_cycles(unsigned long)
+ 121:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    support, maximal possible delay is 4294967.295 ms/ F_CPU in MHz. For
+ 122:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    values greater than the maximal possible delay, overflows results in
+ 123:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    no delay i.e., 0ms.
+ 124:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 125:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Conversion of __us into clock cycles may not always result in integer.
+ 126:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    By default, the clock cycles rounded up to next integer. This ensures that
+ 127:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    the user gets atleast __us microseconds of delay.
+ 128:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 129:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Alternatively, user can define __DELAY_ROUND_DOWN__ and __DELAY_ROUND_CLOSEST__
+ 130:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    to round down and round to closest integer.
+ 131:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 132:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Note: The new implementation of _delay_ms(double __ms) with 
+ 133:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     __builtin_avr_delay_cycles(unsigned long) support is not backward compatible. 
+ 134:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    User can define __DELAY_BACKWARD_COMPATIBLE__ to get a backward compatible delay.
+ 135:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Also, the backward compatible
+ 136:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    algorithm will be chosen if the code is compiled in a <em>freestanding
+ 137:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    environment</em> (GCC option \c -ffreestanding), as the math functions
+ 138:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    required for rounding are not available to the compiler then.
+ 139:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 140:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****  */
+ 141:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** void
+ 142:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** _delay_ms(double __ms)
+ 143:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** {
+ 144:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	double __tmp ; 
+ 145:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+ 146:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 147:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 148:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	uint32_t __ticks_dc;
+ 149:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	extern void __builtin_avr_delay_cycles(unsigned long);
+ 150:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__tmp = ((F_CPU) / 1e3) * __ms;
+ 151:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 152:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#if defined(__DELAY_ROUND_DOWN__)
+ 153:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)fabs(__tmp);
+ 154:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 155:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#elif defined(__DELAY_ROUND_CLOSEST__)
+ 156:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(fabs(__tmp)+0.5);
+ 157:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 158:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#else
+ 159:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		//round up by default
+ 160:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(ceil(fabs(__tmp)));
+ 161:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#endif
+ 162:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 163:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__builtin_avr_delay_cycles(__ticks_dc);
+ 164:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 165:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #else
+ 166:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	uint16_t __ticks;
+ 167:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__tmp = ((F_CPU) / 4e3) * __ms;
+ 168:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	if (__tmp < 1.0)
+ 169:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks = 1;
+ 170:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	else if (__tmp > 65535)
+ 171:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	{
+ 172:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		//	__ticks = requested delay in 1/10 ms
+ 173:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks = (uint16_t) (__ms * 10.0);
+ 174:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		while(__ticks)
+ 175:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		{
+ 176:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 			// wait 1/10 ms
+ 177:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 			_delay_loop_2(((F_CPU) / 4e3) / 10);
+ 178:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 			__ticks --;
+ 179:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		}
+ 180:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		return;
+ 181:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	}
+ 182:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	else
+ 183:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks = (uint16_t)__tmp;
+ 184:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	_delay_loop_2(__ticks);
+ 185:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+ 186:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** }
+ 187:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 188:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /**
+ 189:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    \ingroup util_delay
+ 190:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 191:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Perform a delay of \c __us microseconds, using _delay_loop_1().
+ 192:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 193:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    The macro F_CPU is supposed to be defined to a
+ 194:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    constant defining the CPU clock frequency (in Hertz).
+ 195:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 196:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    The maximal possible delay is 768 us / F_CPU in MHz.
+ 197:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 198:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    If the user requests a delay greater than the maximal possible one,
+ 199:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    _delay_us() will automatically call _delay_ms() instead.  The user
+ 200:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    will not be informed about this case.
+ 201:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 202:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    If the avr-gcc toolchain has __builtin_avr_delay_cycles(unsigned long)
+ 203:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    support, maximal possible delay is 4294967.295 us/ F_CPU in MHz. For
+ 204:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    values greater than the maximal possible delay, overflow results in
+ 205:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    no delay i.e., 0us.
+ 206:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   
+ 207:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Conversion of __us into clock cycles may not always result in integer.
+ 208:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    By default, the clock cycles rounded up to next integer. This ensures that
+ 209:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    the user gets atleast __us microseconds of delay.
+ 210:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 211:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Alternatively, user can define __DELAY_ROUND_DOWN__ and __DELAY_ROUND_CLOSEST__
+ 212:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    to round down and round to closest integer.
+ 213:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****  
+ 214:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Note: The new implementation of _delay_us(double __us) with 
+ 215:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     __builtin_avr_delay_cycles(unsigned long) support is not backward compatible.
+ 216:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    User can define __DELAY_BACKWARD_COMPATIBLE__ to get a backward compatible delay.
+ 217:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Also, the backward compatible
+ 218:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    algorithm will be chosen if the code is compiled in a <em>freestanding
+ 219:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    environment</em> (GCC option \c -ffreestanding), as the math functions
+ 220:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    required for rounding are not available to the compiler then.
+ 221:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 222:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****  */
+ 223:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** void
+ 224:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** _delay_us(double __us)
+ 225:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** {
+ 226:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	double __tmp ; 
+ 227:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+ 228:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 229:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 230:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	uint32_t __ticks_dc;
+ 231:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	extern void __builtin_avr_delay_cycles(unsigned long);
+ 232:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__tmp = ((F_CPU) / 1e6) * __us;
+ 233:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 234:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#if defined(__DELAY_ROUND_DOWN__)
+ 235:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)fabs(__tmp);
+ 236:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 237:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#elif defined(__DELAY_ROUND_CLOSEST__)
+ 238:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(fabs(__tmp)+0.5);
+ 239:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 240:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#else
+ 241:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		//round up by default
+ 242:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(ceil(fabs(__tmp)));
+ 243:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#endif
+ 244:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 245:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__builtin_avr_delay_cycles(__ticks_dc);
+ 144               		.loc 2 245 0
+ 145 0076 BAE1      		ldi r27,lo8(26)
+ 146 0078 BA95      		1: dec r27
+ 147 007a 01F4      		brne 1b
+ 148 007c 00C0      		rjmp .
+ 149               	.LBE7:
+ 150               	.LBE6:
+ 160:lcd.c         ****     _delay_us (5);
+ 161:lcd.c         ****     prefs_large = PINB & 0x08;
+ 151               		.loc 1 161 0
+ 152 007e 83B1      		in r24,0x3
+ 153 0080 8870      		andi r24,lo8(8)
+ 154 0082 8093 0000 		sts prefs+10,r24
+ 162:lcd.c         ****     PORTB &= ~0x08;    
+ 155               		.loc 1 162 0
+ 156 0086 2B98      		cbi 0x5,3
+ 157               	.LVL5:
+ 158 0088 8F01      		movw r16,r30
+ 163:lcd.c         ****     
+ 164:lcd.c         ****     // Noted that reading PIN B read is sometimes incorrect. If you want to
+ 165:lcd.c         ****     // force the screen size then over-ride the PIN reading and explicitly
+ 166:lcd.c         ****     // set the screen size you are using and then the issue will be resolved. 
+ 167:lcd.c         ****     // prefs_large = 0x08;              // Large 160x128 screen.
+ 168:lcd.c         ****     // prefs_large = 0x00;              // Small 128x64 screen.
+ 169:lcd.c         ****     
+ 170:lcd.c         ****     // Write back the correct values for factory default.
+ 171:lcd.c         ****     for (ii = EEPROM_ADDR_MAGIC; ii < EEPROM_ADDR_MAX; ii++)
+ 159               		.loc 1 171 0
+ 160 008a C0E0      		ldi r28,0
+ 161 008c D0E0      		ldi r29,0
+ 162               	.LVL6:
+ 163               	.L7:
+ 172:lcd.c         ****         eeprom_write_byte ((uint8_t *)(ii), prefs [ii]);
+ 164               		.loc 1 172 0 discriminator 2
+ 165 008e F801      		movw r30,r16
+ 166 0090 6191      		ld r22,Z+
+ 167 0092 8F01      		movw r16,r30
+ 168 0094 CE01      		movw r24,r28
+ 169 0096 0E94 0000 		call __eewr_byte_m168
+ 170               	.LVL7:
+ 171:lcd.c         ****     for (ii = EEPROM_ADDR_MAGIC; ii < EEPROM_ADDR_MAX; ii++)
+ 171               		.loc 1 171 0 discriminator 2
+ 172 009a 2196      		adiw r28,1
+ 173               	.LVL8:
+ 174 009c CC30      		cpi r28,12
+ 175 009e D105      		cpc r29,__zero_reg__
+ 176 00a0 01F4      		brne .L7
+ 177               	.LVL9:
+ 171:lcd.c         ****     for (ii = EEPROM_ADDR_MAGIC; ii < EEPROM_ADDR_MAX; ii++)
+ 178               		.loc 1 171 0 is_stmt 0
+ 179 00a2 C0E2      		ldi r28,lo8(32)
+ 180 00a4 D0E0      		ldi r29,0
+ 181               	.LVL10:
+ 182               	.L11:
+ 183 00a6 FE01      		movw r30,r28
+ 184 00a8 E050      		subi r30,lo8(-(sparkfun_logo.2461-32))
+ 185 00aa F040      		sbci r31,hi8(-(sparkfun_logo.2461-32))
+ 186               	.LVL11:
+ 187               	.LBB8:
+ 173:lcd.c         **** 
+ 174:lcd.c         ****     // Write the sparkfun logo into EEPROM
+ 175:lcd.c         ****     ptr = (uint8_t *)(sparkfun_logo);
+ 176:lcd.c         ****     for (ii = 0; ii < sizeof (sparkfun_logo); ii++)
+ 177:lcd.c         ****     {
+ 178:lcd.c         ****         eeprom_write_byte ((uint8_t *)(EEPROM_ADDR_SPRITE_START + ii),
+ 179:lcd.c         ****                            pgm_read_byte (ptr++));
+ 188               		.loc 1 179 0 is_stmt 1 discriminator 2
+ 189               	/* #APP */
+ 190               	 ;  179 "lcd.c" 1
+ 191 00ac 6491      		lpm r22, Z
+ 192               		
+ 193               	 ;  0 "" 2
+ 194               	.LVL12:
+ 195               	/* #NOAPP */
+ 196               	.LBE8:
+ 178:lcd.c         ****         eeprom_write_byte ((uint8_t *)(EEPROM_ADDR_SPRITE_START + ii),
+ 197               		.loc 1 178 0 discriminator 2
+ 198 00ae CE01      		movw r24,r28
+ 199 00b0 0E94 0000 		call __eewr_byte_m168
+ 200               	.LVL13:
+ 201 00b4 2196      		adiw r28,1
+ 202               	.LVL14:
+ 176:lcd.c         ****     for (ii = 0; ii < sizeof (sparkfun_logo); ii++)
+ 203               		.loc 1 176 0 discriminator 2
+ 204 00b6 C633      		cpi r28,54
+ 205 00b8 D105      		cpc r29,__zero_reg__
+ 206 00ba 01F4      		brne .L11
+ 176:lcd.c         ****     for (ii = 0; ii < sizeof (sparkfun_logo); ii++)
+ 207               		.loc 1 176 0 is_stmt 0
+ 208 00bc 82E4      		ldi r24,lo8(66)
+ 209 00be 90E0      		ldi r25,0
+ 210               	.LVL15:
+ 211               	.L10:
+ 180:lcd.c         ****     }
+ 181:lcd.c         **** 
+ 182:lcd.c         ****     // Clear the remaining EEPROM sprite memory skipping over the sparkfun
+ 183:lcd.c         ****     // logo we have just written.
+ 184:lcd.c         ****     ptr = (uint8_t *)(EEPROM_ADDR_SPRITE_START + EEPROM_SPRITE_SIZE);
+ 185:lcd.c         ****     for (ii = 0; ii < ((EEPROM_SPRITE_NUM - 1) * EEPROM_SPRITE_SIZE); ii++)
+ 186:lcd.c         ****     {
+ 187:lcd.c         ****         eeprom_write_byte (ptr++, 0);
+ 212               		.loc 1 187 0 is_stmt 1 discriminator 2
+ 213 00c0 EC01      		movw r28,r24
+ 214 00c2 2196      		adiw r28,1
+ 215               	.LVL16:
+ 216 00c4 60E0      		ldi r22,0
+ 217 00c6 0E94 0000 		call __eewr_byte_m168
+ 218               	.LVL17:
+ 185:lcd.c         ****     for (ii = 0; ii < ((EEPROM_SPRITE_NUM - 1) * EEPROM_SPRITE_SIZE); ii++)
+ 219               		.loc 1 185 0 discriminator 2
+ 220 00ca CC3F      		cpi r28,-4
+ 221 00cc F1E0      		ldi r31,1
+ 222 00ce DF07      		cpc r29,r31
+ 223 00d0 01F0      		breq .L5
+ 224               		.loc 1 187 0
+ 225 00d2 CE01      		movw r24,r28
+ 226 00d4 00C0      		rjmp .L10
+ 227               	.L5:
+ 228               	/* epilogue start */
+ 188:lcd.c         ****     }
+ 189:lcd.c         **** }
+ 229               		.loc 1 189 0
+ 230 00d6 DF91      		pop r29
+ 231 00d8 CF91      		pop r28
+ 232               	.LVL18:
+ 233 00da 1F91      		pop r17
+ 234 00dc 0F91      		pop r16
+ 235 00de 0895      		ret
+ 236               		.cfi_endproc
+ 237               	.LFE13:
+ 239               	.global	lcd_set
+ 241               	lcd_set:
+ 242               	.LFB14:
+ 190:lcd.c         **** 
+ 191:lcd.c         **** //////////////////////////////////////////////////////////////////////////////
+ 192:lcd.c         **** /// Set the value of a EEPROM location. The value is stored in EEPROM.
+ 193:lcd.c         **** ///
+ 194:lcd.c         **** /// @param [in] check A check byte to ensure this is a set command
+ 195:lcd.c         **** /// @param [in] id The identiy of the EEPROM location to change.
+ 196:lcd.c         **** /// @param [in] value The value to assign to the EEPROM location.
+ 197:lcd.c         **** ///
+ 198:lcd.c         **** void
+ 199:lcd.c         **** lcd_set (uint8_t check, uint8_t id, uint8_t value)
+ 200:lcd.c         **** {
+ 243               		.loc 1 200 0
+ 244               		.cfi_startproc
+ 245               	.LVL19:
+ 246 00e0 0F93      		push r16
+ 247               	.LCFI4:
+ 248               		.cfi_def_cfa_offset 3
+ 249               		.cfi_offset 16, -2
+ 250 00e2 1F93      		push r17
+ 251               	.LCFI5:
+ 252               		.cfi_def_cfa_offset 4
+ 253               		.cfi_offset 17, -3
+ 254 00e4 CF93      		push r28
+ 255               	.LCFI6:
+ 256               		.cfi_def_cfa_offset 5
+ 257               		.cfi_offset 28, -4
+ 258 00e6 DF93      		push r29
+ 259               	.LCFI7:
+ 260               		.cfi_def_cfa_offset 6
+ 261               		.cfi_offset 29, -5
+ 262 00e8 1F92      		push __zero_reg__
+ 263               	.LCFI8:
+ 264               		.cfi_def_cfa_offset 7
+ 265 00ea CDB7      		in r28,__SP_L__
+ 266 00ec DEB7      		in r29,__SP_H__
+ 267               	.LCFI9:
+ 268               		.cfi_def_cfa_register 28
+ 269               	/* prologue: function */
+ 270               	/* frame size = 1 */
+ 271               	/* stack size = 5 */
+ 272               	.L__stack_usage = 5
+ 201:lcd.c         ****     // Basic check to ensure that the first byte is the check byte.
+ 202:lcd.c         ****     if (check != LCD_SET_CHECKBYTE)
+ 273               		.loc 1 202 0
+ 274 00ee 853C      		cpi r24,lo8(-59)
+ 275 00f0 01F4      		brne .L12
+ 203:lcd.c         ****         return;                         // Do not set anything.
+ 204:lcd.c         ****     // Check the range of the identity.
+ 205:lcd.c         ****     if (id > EEPROM_ADDR_MAX)
+ 276               		.loc 1 205 0
+ 277 00f2 6D30      		cpi r22,lo8(13)
+ 278 00f4 00F4      		brsh .L12
+ 206:lcd.c         ****         return;                         // Do not set anything.Out of range
+ 207:lcd.c         ****     // Set the value, there is no checking of the value used. 
+ 208:lcd.c         ****     prefs[id] = value;
+ 279               		.loc 1 208 0
+ 280 00f6 062F      		mov r16,r22
+ 281 00f8 10E0      		ldi r17,0
+ 282 00fa F801      		movw r30,r16
+ 283 00fc E050      		subi r30,lo8(-(prefs))
+ 284 00fe F040      		sbci r31,hi8(-(prefs))
+ 285 0100 4083      		st Z,r20
+ 209:lcd.c         ****     // Read the value from EEPROM, if it is different then write the new
+ 210:lcd.c         ****     // value. Keep the compiler quiet by casting twice to the correct size.
+ 211:lcd.c         ****     if (eeprom_read_byte ((uint8_t *)((uint16_t)(id))) != value)
+ 286               		.loc 1 211 0
+ 287 0102 C801      		movw r24,r16
+ 288               	.LVL20:
+ 289 0104 4983      		std Y+1,r20
+ 290 0106 0E94 0000 		call __eerd_byte_m168
+ 291               	.LVL21:
+ 292 010a 4981      		ldd r20,Y+1
+ 293               	.LVL22:
+ 294 010c 8417      		cp r24,r20
+ 295 010e 01F0      		breq .L12
+ 212:lcd.c         ****         eeprom_write_byte ((uint8_t *)((uint16_t)(id)), value);
+ 296               		.loc 1 212 0
+ 297 0110 642F      		mov r22,r20
+ 298 0112 C801      		movw r24,r16
+ 299               	/* epilogue start */
+ 213:lcd.c         **** }
+ 300               		.loc 1 213 0
+ 301 0114 0F90      		pop __tmp_reg__
+ 302 0116 DF91      		pop r29
+ 303 0118 CF91      		pop r28
+ 304 011a 1F91      		pop r17
+ 305 011c 0F91      		pop r16
+ 306               	.LVL23:
+ 212:lcd.c         ****         eeprom_write_byte ((uint8_t *)((uint16_t)(id)), value);
+ 307               		.loc 1 212 0
+ 308 011e 0C94 0000 		jmp __eewr_byte_m168
+ 309               	.LVL24:
+ 310               	.L12:
+ 311               	/* epilogue start */
+ 312               		.loc 1 213 0
+ 313 0122 0F90      		pop __tmp_reg__
+ 314 0124 DF91      		pop r29
+ 315 0126 CF91      		pop r28
+ 316 0128 1F91      		pop r17
+ 317 012a 0F91      		pop r16
+ 318 012c 0895      		ret
+ 319               		.cfi_endproc
+ 320               	.LFE14:
+ 322               	.global	lcd_query
+ 324               	lcd_query:
+ 325               	.LFB15:
+ 214:lcd.c         **** 
+ 215:lcd.c         **** //////////////////////////////////////////////////////////////////////////////
+ 216:lcd.c         **** /// Query the internal state of the system. Return the settings to the caller
+ 217:lcd.c         **** /// via the serial. The format is defined as follows:
+ 218:lcd.c         **** ///
+ 219:lcd.c         **** /// Query == 0 -- Screen dimesion
+ 220:lcd.c         **** /// byte[0] = Q
+ 221:lcd.c         **** /// byte[1] = <x-dim>
+ 222:lcd.c         **** /// byte[2] = <y-dim>
+ 223:lcd.c         **** ///
+ 224:lcd.c         **** /// Query == 1 -- Preferences
+ 225:lcd.c         **** /// byte[0] = <Baud rate>
+ 226:lcd.c         **** /// byte[1] = <Backlight level>
+ 227:lcd.c         **** /// byte[2] = <Splash screen>
+ 228:lcd.c         **** /// byte[3] = <Reverse screen>
+ 229:lcd.c         **** /// byte[4] = <debug>
+ 230:lcd.c         **** /// byte[5] = <crlf>
+ 231:lcd.c         **** /// byte[6] = <xon position>
+ 232:lcd.c         **** /// byte[7] = <xoff position>
+ 233:lcd.c         **** /// byte[8] = <scroll>
+ 234:lcd.c         **** ///
+ 235:lcd.c         **** /// Query == 2 -- Version string
+ 236:lcd.c         **** /// byte[0] = <version string>0x00
+ 237:lcd.c         **** ///
+ 238:lcd.c         **** /// Query == 3 -- EEPROM sprites
+ 239:lcd.c         **** /// byte[0]  = count
+ 240:lcd.c         **** /// byte[1..count] = EEPROM width
+ 241:lcd.c         **** ///
+ 242:lcd.c         **** void
+ 243:lcd.c         **** lcd_query (uint8_t info)
+ 244:lcd.c         **** {
+ 326               		.loc 1 244 0
+ 327               		.cfi_startproc
+ 328               	.LVL25:
+ 329 012e 1F93      		push r17
+ 330               	.LCFI10:
+ 331               		.cfi_def_cfa_offset 3
+ 332               		.cfi_offset 17, -2
+ 333 0130 CF93      		push r28
+ 334               	.LCFI11:
+ 335               		.cfi_def_cfa_offset 4
+ 336               		.cfi_offset 28, -3
+ 337 0132 DF93      		push r29
+ 338               	.LCFI12:
+ 339               		.cfi_def_cfa_offset 5
+ 340               		.cfi_offset 29, -4
+ 341               	/* prologue: function */
+ 342               	/* frame size = 0 */
+ 343               	/* stack size = 3 */
+ 344               	.L__stack_usage = 3
+ 345 0134 182F      		mov r17,r24
+ 346               	.LVL26:
+ 245:lcd.c         ****     uint8_t cc = 0xff;
+ 246:lcd.c         ****     
+ 247:lcd.c         ****     // Put the X andy dimensions.
+ 248:lcd.c         ****     serial_putc ('Q');
+ 347               		.loc 1 248 0
+ 348 0136 81E5      		ldi r24,lo8(81)
+ 349               	.LVL27:
+ 350 0138 0E94 0000 		call serial_putc
+ 351               	.LVL28:
+ 249:lcd.c         ****     // EEPROM locations.
+ 250:lcd.c         ****     if (info < EEPROM_ADDR_MAX)
+ 352               		.loc 1 250 0
+ 353 013c 1C30      		cpi r17,lo8(12)
+ 354 013e 00F4      		brsh .L17
+ 251:lcd.c         ****         cc = prefs[info];
+ 355               		.loc 1 251 0
+ 356 0140 E12F      		mov r30,r17
+ 357 0142 F0E0      		ldi r31,0
+ 358 0144 E050      		subi r30,lo8(-(prefs))
+ 359 0146 F040      		sbci r31,hi8(-(prefs))
+ 360 0148 8081      		ld r24,Z
+ 361               	.LVL29:
+ 362 014a 00C0      		rjmp .L18
+ 363               	.LVL30:
+ 364               	.L17:
+ 252:lcd.c         ****     // Constant locations
+ 253:lcd.c         ****     else if (info & 0x20)
+ 365               		.loc 1 253 0
+ 366 014c 15FF      		sbrs r17,5
+ 367 014e 00C0      		rjmp .L19
+ 254:lcd.c         ****     {
+ 255:lcd.c         ****         info &= ~0x20;
+ 368               		.loc 1 255 0
+ 369 0150 1F7D      		andi r17,lo8(-33)
+ 370               	.LVL31:
+ 256:lcd.c         ****         if (info < sizeof (consts))
+ 371               		.loc 1 256 0
+ 372 0152 1630      		cpi r17,lo8(6)
+ 373 0154 00F4      		brsh .L24
+ 374               	.LVL32:
+ 375               	.LBB9:
+ 257:lcd.c         ****             cc = pgm_read_byte (&consts[info]);
+ 376               		.loc 1 257 0
+ 377 0156 E12F      		mov r30,r17
+ 378 0158 F0E0      		ldi r31,0
+ 379 015a E050      		subi r30,lo8(-(consts))
+ 380 015c F040      		sbci r31,hi8(-(consts))
+ 381               	/* #APP */
+ 382               	 ;  257 "lcd.c" 1
+ 383 015e 8491      		lpm r24, Z
+ 384               		
+ 385               	 ;  0 "" 2
+ 386               	.LVL33:
+ 387               	/* #NOAPP */
+ 388 0160 00C0      		rjmp .L18
+ 389               	.LVL34:
+ 390               	.L19:
+ 391               	.LBE9:
+ 258:lcd.c         ****     }
+ 259:lcd.c         ****     // x & y dimensions
+ 260:lcd.c         ****     else if (info & 0x40)
+ 392               		.loc 1 260 0
+ 393 0162 16FF      		sbrs r17,6
+ 394 0164 00C0      		rjmp .L20
+ 261:lcd.c         ****     {
+ 262:lcd.c         ****         if (info & 1)
+ 395               		.loc 1 262 0
+ 396 0166 10FF      		sbrs r17,0
+ 397 0168 00C0      		rjmp .L21
+ 263:lcd.c         ****             cc = y_dim;
+ 398               		.loc 1 263 0
+ 399 016a 8091 0000 		lds r24,y_dim
+ 400               	.LVL35:
+ 401 016e 00C0      		rjmp .L18
+ 402               	.LVL36:
+ 403               	.L21:
+ 264:lcd.c         ****         else
+ 265:lcd.c         ****             cc = x_dim;
+ 404               		.loc 1 265 0
+ 405 0170 8091 0000 		lds r24,x_dim
+ 406               	.LVL37:
+ 407 0174 00C0      		rjmp .L18
+ 408               	.LVL38:
+ 409               	.L20:
+ 266:lcd.c         ****     }
+ 267:lcd.c         ****     // The sprite EEPROM widths
+ 268:lcd.c         ****     else if (info & 0x80)
+ 410               		.loc 1 268 0
+ 411 0176 17FF      		sbrs r17,7
+ 412 0178 00C0      		rjmp .L24
+ 413               	.LVL39:
+ 414               	.LBB10:
+ 269:lcd.c         ****     {
+ 270:lcd.c         ****         const uint8_t *eeprom_addr = (uint8_t *) EEPROM_ADDR_SPRITE_START; // Address in EEPROM
+ 271:lcd.c         ****         uint8_t height_offset;
+ 272:lcd.c         ****         
+ 273:lcd.c         ****         height_offset = info & 1;
+ 274:lcd.c         ****         info &= ~0x80;
+ 415               		.loc 1 274 0
+ 416 017a 812F      		mov r24,r17
+ 417 017c 8F77      		andi r24,lo8(127)
+ 418               	.LVL40:
+ 275:lcd.c         ****         info >>= 1;                     // Divide by 2;
+ 419               		.loc 1 275 0
+ 420 017e 8695      		lsr r24
+ 421               	.LVL41:
+ 276:lcd.c         ****         if (info < EEPROM_SPRITE_NUM)
+ 422               		.loc 1 276 0
+ 423 0180 8E30      		cpi r24,lo8(14)
+ 424 0182 00F4      		brsh .L24
+ 277:lcd.c         ****         {
+ 278:lcd.c         ****             cc = eeprom_read_byte (&eeprom_addr[(EEPROM_SPRITE_SIZE * info) + height_offset]);
+ 425               		.loc 1 278 0
+ 426 0184 1170      		andi r17,1
+ 427               	.LVL42:
+ 428 0186 C12F      		mov r28,r17
+ 429 0188 90E0      		ldi r25,0
+ 430 018a D92F      		mov r29,r25
+ 431 018c 92E2      		ldi r25,lo8(34)
+ 432 018e 899F      		mul r24,r25
+ 433 0190 C00D      		add r28,r0
+ 434 0192 D11D      		adc r29,r1
+ 435 0194 1124      		clr __zero_reg__
+ 436 0196 CE01      		movw r24,r28
+ 437               	.LVL43:
+ 438 0198 8096      		adiw r24,32
+ 439 019a 0E94 0000 		call __eerd_byte_m168
+ 440               	.LVL44:
+ 441 019e 00C0      		rjmp .L18
+ 442               	.LVL45:
+ 443               	.L24:
+ 444               	.LBE10:
+ 245:lcd.c         ****     uint8_t cc = 0xff;
+ 445               		.loc 1 245 0
+ 446 01a0 8FEF      		ldi r24,lo8(-1)
+ 447               	.LVL46:
+ 448               	.L18:
+ 449               	/* epilogue start */
+ 279:lcd.c         ****         }
+ 280:lcd.c         ****     }
+ 281:lcd.c         ****     serial_putc (cc);        
+ 282:lcd.c         **** }
+ 450               		.loc 1 282 0
+ 451 01a2 DF91      		pop r29
+ 452 01a4 CF91      		pop r28
+ 453 01a6 1F91      		pop r17
+ 281:lcd.c         ****     serial_putc (cc);        
+ 454               		.loc 1 281 0
+ 455 01a8 0C94 0000 		jmp serial_putc
+ 456               	.LVL47:
+ 457               		.cfi_endproc
+ 458               	.LFE15:
+ 460               	.global	lcd_screen_reverse
+ 462               	lcd_screen_reverse:
+ 463               	.LFB16:
+ 283:lcd.c         **** 
+ 284:lcd.c         **** //////////////////////////////////////////////////////////////////////////////
+ 285:lcd.c         **** /// Reverse the screen
+ 286:lcd.c         **** ///
+ 287:lcd.c         **** /// @param [in] mode  The mode to assign to the reverse preference.
+ 288:lcd.c         **** /// @param [in] cmd   The command that we are executing. If it is a
+ 289:lcd.c         **** ///                   CMD_REVERSE_MODE then save to EEPROM.
+ 290:lcd.c         **** void
+ 291:lcd.c         **** lcd_screen_reverse (uint8_t mode, uint8_t cmd)
+ 292:lcd.c         **** {
+ 464               		.loc 1 292 0
+ 465               		.cfi_startproc
+ 466               	.LVL48:
+ 467               	/* prologue: function */
+ 468               	/* frame size = 0 */
+ 469               	/* stack size = 0 */
+ 470               	.L__stack_usage = 0
+ 293:lcd.c         ****     // Save the user preference if this is a persistent command.
+ 294:lcd.c         ****     if (cmd == CMD_REVERSE_MODE)
+ 471               		.loc 1 294 0
+ 472 01ac 6231      		cpi r22,lo8(18)
+ 473 01ae 01F4      		brne .L26
+ 474               	.LVL49:
+ 295:lcd.c         ****     {
+ 296:lcd.c         ****         // Determine which way round the screen is.
+ 297:lcd.c         ****         if (is_reverse())
+ 475               		.loc 1 297 0
+ 476 01b0 41E0      		ldi r20,lo8(1)
+ 477 01b2 8091 0000 		lds r24,prefs+4
+ 478 01b6 8111      		cpse r24,__zero_reg__
+ 479 01b8 40E0      		ldi r20,0
+ 480               	.L27:
+ 298:lcd.c         ****             mode = MODE_NORMAL;
+ 299:lcd.c         ****         else
+ 300:lcd.c         ****             mode = MODE_REVERSE;
+ 301:lcd.c         ****         
+ 302:lcd.c         ****         // Set the EEPROM values
+ 303:lcd.c         ****         lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_REVERSE, mode);
+ 481               		.loc 1 303 0
+ 482 01ba 64E0      		ldi r22,lo8(4)
+ 483               	.LVL50:
+ 484 01bc 85EC      		ldi r24,lo8(-59)
+ 485 01be 0E94 0000 		call lcd_set
+ 486               	.LVL51:
+ 487 01c2 00C0      		rjmp .L28
+ 488               	.LVL52:
+ 489               	.L26:
+ 304:lcd.c         ****     }
+ 305:lcd.c         ****     else
+ 306:lcd.c         ****         prefs_reverse = mode & MODE_NORMAL_MASK;
+ 490               		.loc 1 306 0
+ 491 01c4 8170      		andi r24,lo8(1)
+ 492               	.LVL53:
+ 493 01c6 8093 0000 		sts prefs+4,r24
+ 494               	.LVL54:
+ 495               	.L28:
+ 496               	.LBB11:
+ 307:lcd.c         **** 
+ 308:lcd.c         ****     // Reverse the screen.
+ 309:lcd.c         ****     ((vfunc_p_t)(pgm_read_word(&functabP [F_DRV_SCREEN_REVERSE])))(draw_buffer);
+ 497               		.loc 1 309 0
+ 498 01ca E091 0000 		lds r30,functabP
+ 499 01ce F091 0000 		lds r31,functabP+1
+ 500 01d2 3696      		adiw r30,6
+ 501               	.LVL55:
+ 502               	/* #APP */
+ 503               	 ;  309 "lcd.c" 1
+ 504 01d4 2591      		lpm r18, Z+
+ 505 01d6 3491      		lpm r19, Z
+ 506               		
+ 507               	 ;  0 "" 2
+ 508               	.LVL56:
+ 509               	/* #NOAPP */
+ 510               	.LBE11:
+ 511 01d8 80E0      		ldi r24,lo8(draw_buffer)
+ 512 01da 90E0      		ldi r25,hi8(draw_buffer)
+ 513 01dc F901      		movw r30,r18
+ 514 01de 0994      		ijmp
+ 515               	.LVL57:
+ 516               		.cfi_endproc
+ 517               	.LFE16:
+ 519               	.global	lcd_demo
+ 521               	lcd_demo:
+ 522               	.LFB17:
+ 310:lcd.c         **** }
+ 311:lcd.c         **** 
+ 312:lcd.c         **** /////////////////////////////////////////////////////////////////////////////
+ 313:lcd.c         **** /// Demonstration
+ 314:lcd.c         **** void
+ 315:lcd.c         **** lcd_demo (uint8_t cmd)
+ 316:lcd.c         **** {
+ 523               		.loc 1 316 0
+ 524               		.cfi_startproc
+ 525               	.LVL58:
+ 526 01e0 EF92      		push r14
+ 527               	.LCFI13:
+ 528               		.cfi_def_cfa_offset 3
+ 529               		.cfi_offset 14, -2
+ 530 01e2 FF92      		push r15
+ 531               	.LCFI14:
+ 532               		.cfi_def_cfa_offset 4
+ 533               		.cfi_offset 15, -3
+ 534 01e4 0F93      		push r16
+ 535               	.LCFI15:
+ 536               		.cfi_def_cfa_offset 5
+ 537               		.cfi_offset 16, -4
+ 538 01e6 1F93      		push r17
+ 539               	.LCFI16:
+ 540               		.cfi_def_cfa_offset 6
+ 541               		.cfi_offset 17, -5
+ 542 01e8 CF93      		push r28
+ 543               	.LCFI17:
+ 544               		.cfi_def_cfa_offset 7
+ 545               		.cfi_offset 28, -6
+ 546 01ea DF93      		push r29
+ 547               	.LCFI18:
+ 548               		.cfi_def_cfa_offset 8
+ 549               		.cfi_offset 29, -7
+ 550 01ec 1F92      		push __zero_reg__
+ 551               	.LCFI19:
+ 552               		.cfi_def_cfa_offset 9
+ 553 01ee CDB7      		in r28,__SP_L__
+ 554 01f0 DEB7      		in r29,__SP_H__
+ 555               	.LCFI20:
+ 556               		.cfi_def_cfa_register 28
+ 557               	/* prologue: function */
+ 558               	/* frame size = 1 */
+ 559               	/* stack size = 7 */
+ 560               	.L__stack_usage = 7
+ 317:lcd.c         ****     // Clear the screen
+ 318:lcd.c         ****     lcd_screen_clear ();
+ 561               		.loc 1 318 0
+ 562 01f2 8983      		std Y+1,r24
+ 563 01f4 0E94 0000 		call lcd_screen_clear
+ 564               	.LVL59:
+ 565 01f8 6091 0000 		lds r22,y_dim
+ 319:lcd.c         **** 
+ 320:lcd.c         ****     // Only draw the single sprite when the demo is not invoked.
+ 321:lcd.c         ****     if ((cmd != CMD_DEMO) && (prefs_splash == 2))
+ 566               		.loc 1 321 0
+ 567 01fc 8981      		ldd r24,Y+1
+ 568 01fe 8430      		cpi r24,lo8(4)
+ 569 0200 01F0      		breq .L33
+ 570               		.loc 1 321 0 is_stmt 0 discriminator 1
+ 571 0202 8091 0000 		lds r24,prefs+3
+ 572 0206 8230      		cpi r24,lo8(2)
+ 573 0208 01F4      		brne .L33
+ 322:lcd.c         ****     {
+ 323:lcd.c         ****         // XOR'ing the sprite works in normal and reverse modes
+ 324:lcd.c         ****         sprite_draw (x_dim/2, y_dim/2, 0x80, MODE_XOR|MODE_SPRITE_CENTER|MODE_NORMAL);
+ 574               		.loc 1 324 0 is_stmt 1
+ 575 020a 6695      		lsr r22
+ 576 020c 8091 0000 		lds r24,x_dim
+ 577 0210 2DE0      		ldi r18,lo8(13)
+ 578 0212 40E8      		ldi r20,lo8(-128)
+ 579 0214 8695      		lsr r24
+ 580 0216 0E94 0000 		call sprite_draw
+ 581               	.LVL60:
+ 582 021a 00C0      		rjmp .L34
+ 583               	.L33:
+ 584               	.LBB12:
+ 325:lcd.c         ****     }
+ 326:lcd.c         ****     else
+ 327:lcd.c         ****     {
+ 328:lcd.c         ****         static const uint16_t baudrates [] PROGMEM =
+ 329:lcd.c         ****         {
+ 330:lcd.c         ****             48,   /* 1 */
+ 331:lcd.c         ****             96,   /* 2 */
+ 332:lcd.c         ****             192,  /* 3 */
+ 333:lcd.c         ****             384,  /* 4 */
+ 334:lcd.c         ****             576,  /* 5 */
+ 335:lcd.c         ****             1152  /* 6 */
+ 336:lcd.c         ****         };
+ 337:lcd.c         **** 
+ 338:lcd.c         ****         static const char label_0[] PROGMEM = "Baudrate:";
+ 339:lcd.c         ****         static const char label_1[] PROGMEM = "Splash  :";
+ 340:lcd.c         ****         static const char label_2[] PROGMEM = "CRLF    :";
+ 341:lcd.c         ****         static const char label_3[] PROGMEM = "Scroll  :";
+ 342:lcd.c         ****         static const char label_4[] PROGMEM = "B'Light :";
+ 343:lcd.c         ****         static const char label_5[] PROGMEM = "xon/xoff:";
+ 344:lcd.c         ****         static const char label_6[] PROGMEM = "Version :";
+ 345:lcd.c         ****         static const char * const labels[] PROGMEM =
+ 346:lcd.c         ****         {
+ 347:lcd.c         ****             label_0, label_1, label_2, label_3, label_4, label_5, label_6
+ 348:lcd.c         ****         };
+ 349:lcd.c         ****         static const char slash[] PROGMEM = "/";
+ 350:lcd.c         ****         static const char zero2[] PROGMEM = "00";
+ 351:lcd.c         ****         uint8_t yy = (y_dim/2) - 32;
+ 585               		.loc 1 351 0
+ 586 021c 162F      		mov r17,r22
+ 587 021e 1695      		lsr r17
+ 588               	.LVL61:
+ 352:lcd.c         ****         uint8_t xx;
+ 353:lcd.c         ****         uint8_t ii;
+ 354:lcd.c         ****         
+ 355:lcd.c         ****         // Set the font to the 6x8.
+ 356:lcd.c         ****         font_set (0, CMDX_FONT_SET);
+ 589               		.loc 1 356 0
+ 590 0220 68E4      		ldi r22,lo8(72)
+ 591 0222 80E0      		ldi r24,0
+ 592 0224 0E94 0000 		call font_set
+ 593               	.LVL62:
+ 357:lcd.c         ****         
+ 358:lcd.c         ****         // XOR'ing the sprite works in normal and reverse modes
+ 359:lcd.c         ****         sprite_draw (100 + (x_dim - 100) / 2, y_dim/2, 0x80, MODE_XOR|MODE_SPRITE_CENTER|MODE_NORMA
+ 594               		.loc 1 359 0
+ 595 0228 6091 0000 		lds r22,y_dim
+ 596 022c 6695      		lsr r22
+ 597 022e 8091 0000 		lds r24,x_dim
+ 598 0232 90E0      		ldi r25,0
+ 599 0234 8456      		subi r24,100
+ 600 0236 9109      		sbc r25,__zero_reg__
+ 601 0238 97FD      		sbrc r25,7
+ 602 023a 0196      		adiw r24,1
+ 603               	.L35:
+ 604 023c 9595      		asr r25
+ 605 023e 8795      		ror r24
+ 606 0240 2DE0      		ldi r18,lo8(13)
+ 607 0242 40E8      		ldi r20,lo8(-128)
+ 608 0244 8C59      		subi r24,lo8(-(100))
+ 609 0246 0E94 0000 		call sprite_draw
+ 610               	.LVL63:
+ 360:lcd.c         **** 
+ 361:lcd.c         ****         draw_rbox (0, yy, 100, yy + 63, 8, MODE_XOR|MODE_NORMAL);
+ 611               		.loc 1 361 0
+ 612 024a 2FE1      		ldi r18,lo8(31)
+ 613 024c 210F      		add r18,r17
+ 351:lcd.c         ****         uint8_t yy = (y_dim/2) - 32;
+ 614               		.loc 1 351 0
+ 615 024e 60EE      		ldi r22,lo8(-32)
+ 616 0250 610F      		add r22,r17
+ 617               		.loc 1 361 0
+ 618 0252 35E0      		ldi r19,lo8(5)
+ 619 0254 E32E      		mov r14,r19
+ 620 0256 08E0      		ldi r16,lo8(8)
+ 621 0258 44E6      		ldi r20,lo8(100)
+ 622 025a 80E0      		ldi r24,0
+ 623 025c 0E94 0000 		call draw_rbox
+ 624               	.LVL64:
+ 362:lcd.c         **** 
+ 363:lcd.c         ****         xx = 4;
+ 364:lcd.c         ****         yy += xx;
+ 625               		.loc 1 364 0
+ 626 0260 04EE      		ldi r16,lo8(-28)
+ 627 0262 010F      		add r16,r17
+ 628               	.LVL65:
+ 629 0264 40E0      		ldi r20,lo8(labels.2506)
+ 630 0266 E42E      		mov r14,r20
+ 631 0268 40E0      		ldi r20,hi8(labels.2506)
+ 632 026a F42E      		mov r15,r20
+ 365:lcd.c         ****         for (ii = 0; ii < 7; ii++)
+ 633               		.loc 1 365 0
+ 634 026c 10E0      		ldi r17,0
+ 635               	.LVL66:
+ 636               	.L48:
+ 366:lcd.c         ****         {
+ 367:lcd.c         ****             font_position (xx, yy, 0);
+ 637               		.loc 1 367 0
+ 638 026e 40E0      		ldi r20,0
+ 639 0270 602F      		mov r22,r16
+ 640 0272 84E0      		ldi r24,lo8(4)
+ 641 0274 0E94 0000 		call font_position
+ 642               	.LVL67:
+ 368:lcd.c         ****             font_draw_stringP ((char *)(pgm_read_word(&labels[ii])));
+ 643               		.loc 1 368 0
+ 644 0278 F701      		movw r30,r14
+ 645               	/* #APP */
+ 646               	 ;  368 "lcd.c" 1
+ 647 027a 8591      		lpm r24, Z+
+ 648 027c 9491      		lpm r25, Z
+ 649               		
+ 650               	 ;  0 "" 2
+ 651               	/* #NOAPP */
+ 652 027e 0E94 0000 		call font_draw_stringP
+ 653               	.LVL68:
+ 369:lcd.c         **** 
+ 370:lcd.c         ****             switch (ii)
+ 654               		.loc 1 370 0
+ 655 0282 1330      		cpi r17,lo8(3)
+ 656 0284 01F0      		breq .L37
+ 657 0286 00F4      		brsh .L38
+ 658 0288 1130      		cpi r17,lo8(1)
+ 659 028a 01F0      		breq .L39
+ 660 028c 1230      		cpi r17,lo8(2)
+ 661 028e 01F0      		breq .L40
+ 662 0290 00C0      		rjmp .L36
+ 663               	.L38:
+ 664 0292 1530      		cpi r17,lo8(5)
+ 665 0294 01F0      		breq .L41
+ 666 0296 00F0      		brlo .L42
+ 667 0298 1630      		cpi r17,lo8(6)
+ 668 029a 01F4      		brne .+2
+ 669 029c 00C0      		rjmp .L43
+ 670               	.L36:
+ 671               	.LBB13:
+ 371:lcd.c         ****             {
+ 372:lcd.c         ****                 // Baudrate: <value>
+ 373:lcd.c         ****             case 0:
+ 374:lcd.c         ****                 font_draw_number (pgm_read_word (&baudrates[prefs_baudrate-1]));
+ 672               		.loc 1 374 0
+ 673 029e E091 0000 		lds r30,prefs+1
+ 674 02a2 F0E0      		ldi r31,0
+ 675 02a4 EE0F      		lsl r30
+ 676 02a6 FF1F      		rol r31
+ 677 02a8 E050      		subi r30,lo8(-(baudrates.2498-2))
+ 678 02aa F040      		sbci r31,hi8(-(baudrates.2498-2))
+ 679               	.LVL69:
+ 680               	.LBE13:
+ 681               	/* #APP */
+ 682               	 ;  374 "lcd.c" 1
+ 683 02ac 8591      		lpm r24, Z+
+ 684 02ae 9491      		lpm r25, Z
+ 685               		
+ 686               	 ;  0 "" 2
+ 687               	/* #NOAPP */
+ 688 02b0 0E94 0000 		call font_draw_number
+ 689               	.LVL70:
+ 375:lcd.c         ****                 font_draw_stringP (zero2);
+ 690               		.loc 1 375 0
+ 691 02b4 80E0      		ldi r24,lo8(zero2.2508)
+ 692 02b6 90E0      		ldi r25,hi8(zero2.2508)
+ 693 02b8 0E94 0000 		call font_draw_stringP
+ 694               	.LVL71:
+ 376:lcd.c         ****                 break;
+ 695               		.loc 1 376 0
+ 696 02bc 00C0      		rjmp .L44
+ 697               	.L39:
+ 377:lcd.c         **** 
+ 378:lcd.c         ****                 // Splash  : <on>/<off>
+ 379:lcd.c         ****             case 1:
+ 380:lcd.c         ****                 font_draw_on_off (is_splash());
+ 698               		.loc 1 380 0
+ 699 02be 81E0      		ldi r24,lo8(1)
+ 700 02c0 9091 0000 		lds r25,prefs+3
+ 701 02c4 9111      		cpse r25,__zero_reg__
+ 702 02c6 00C0      		rjmp .L45
+ 703 02c8 80E0      		ldi r24,0
+ 704               	.L45:
+ 705 02ca 0E94 0000 		call font_draw_on_off
+ 706               	.LVL72:
+ 381:lcd.c         ****                 if (is_splash())
+ 707               		.loc 1 381 0
+ 708 02ce 8091 0000 		lds r24,prefs+3
+ 709 02d2 8823      		tst r24
+ 710 02d4 01F0      		breq .L44
+ 382:lcd.c         ****                 {
+ 383:lcd.c         ****                     font_draw_stringP (slash);
+ 711               		.loc 1 383 0
+ 712 02d6 80E0      		ldi r24,lo8(slash.2507)
+ 713 02d8 90E0      		ldi r25,hi8(slash.2507)
+ 714 02da 0E94 0000 		call font_draw_stringP
+ 715               	.LVL73:
+ 384:lcd.c         ****                     font_draw_number (prefs_splash);
+ 716               		.loc 1 384 0
+ 717 02de 8091 0000 		lds r24,prefs+3
+ 718 02e2 00C0      		rjmp .L67
+ 719               	.L40:
+ 385:lcd.c         ****                 }
+ 386:lcd.c         ****                 break;
+ 387:lcd.c         **** 
+ 388:lcd.c         ****                 // CRLF    : <on>/<off>
+ 389:lcd.c         ****             case 2:
+ 390:lcd.c         ****                 font_draw_on_off (is_crlf());
+ 720               		.loc 1 390 0
+ 721 02e4 81E0      		ldi r24,lo8(1)
+ 722 02e6 9091 0000 		lds r25,prefs+6
+ 723 02ea 00C0      		rjmp .L66
+ 724               	.L37:
+ 391:lcd.c         ****                 break;
+ 392:lcd.c         **** 
+ 393:lcd.c         ****                 // Scroll  : <on>/<off>
+ 394:lcd.c         ****             case 3:
+ 395:lcd.c         ****                 font_draw_on_off (is_scroll());
+ 725               		.loc 1 395 0
+ 726 02ec 81E0      		ldi r24,lo8(1)
+ 727 02ee 9091 0000 		lds r25,prefs+9
+ 728               	.L66:
+ 729 02f2 9111      		cpse r25,__zero_reg__
+ 730 02f4 80E0      		ldi r24,0
+ 731               	.L47:
+ 732 02f6 0E94 0000 		call font_draw_on_off
+ 733               	.LVL74:
+ 396:lcd.c         ****                 break;
+ 734               		.loc 1 396 0
+ 735 02fa 00C0      		rjmp .L44
+ 736               	.L42:
+ 397:lcd.c         **** 
+ 398:lcd.c         ****                 // B'Light : <value>
+ 399:lcd.c         ****             case 4:
+ 400:lcd.c         ****                 font_draw_number (prefs_backlight);
+ 737               		.loc 1 400 0
+ 738 02fc 8091 0000 		lds r24,prefs+2
+ 739 0300 00C0      		rjmp .L67
+ 740               	.L41:
+ 401:lcd.c         ****                 break;
+ 402:lcd.c         **** 
+ 403:lcd.c         ****                 // xon/xoff: <xon>/<xoff>
+ 404:lcd.c         ****             case 5:
+ 405:lcd.c         ****                 font_draw_number (prefs_xon);
+ 741               		.loc 1 405 0
+ 742 0302 8091 0000 		lds r24,prefs+7
+ 743 0306 90E0      		ldi r25,0
+ 744 0308 0E94 0000 		call font_draw_number
+ 745               	.LVL75:
+ 406:lcd.c         ****                 font_draw_stringP (slash);
+ 746               		.loc 1 406 0
+ 747 030c 80E0      		ldi r24,lo8(slash.2507)
+ 748 030e 90E0      		ldi r25,hi8(slash.2507)
+ 749 0310 0E94 0000 		call font_draw_stringP
+ 750               	.LVL76:
+ 407:lcd.c         ****                 font_draw_number (prefs_xoff);
+ 751               		.loc 1 407 0
+ 752 0314 8091 0000 		lds r24,prefs+8
+ 753               	.L67:
+ 754 0318 90E0      		ldi r25,0
+ 755 031a 00C0      		rjmp .L64
+ 756               	.L43:
+ 408:lcd.c         ****                 break;
+ 409:lcd.c         **** 
+ 410:lcd.c         ****                 // Version : <major>.<minor>
+ 411:lcd.c         ****             case 6:
+ 412:lcd.c         ****                 font_draw_number (VERSION_MAJOR);
+ 757               		.loc 1 412 0
+ 758 031c 81E0      		ldi r24,lo8(1)
+ 759 031e 90E0      		ldi r25,0
+ 760 0320 0E94 0000 		call font_draw_number
+ 761               	.LVL77:
+ 413:lcd.c         ****                 font_draw ('.');
+ 762               		.loc 1 413 0
+ 763 0324 8EE2      		ldi r24,lo8(46)
+ 764 0326 0E94 0000 		call font_draw
+ 765               	.LVL78:
+ 414:lcd.c         ****                 font_draw_number (VERSION_MINOR);
+ 766               		.loc 1 414 0
+ 767 032a 86E2      		ldi r24,lo8(38)
+ 768 032c 90E0      		ldi r25,0
+ 769               	.L64:
+ 770 032e 0E94 0000 		call font_draw_number
+ 771               	.LVL79:
+ 772               	.L44:
+ 415:lcd.c         ****                 break;
+ 416:lcd.c         ****             }
+ 417:lcd.c         ****             yy += 8;
+ 773               		.loc 1 417 0
+ 774 0332 085F      		subi r16,lo8(-(8))
+ 775               	.LVL80:
+ 365:lcd.c         ****         for (ii = 0; ii < 7; ii++)
+ 776               		.loc 1 365 0
+ 777 0334 1F5F      		subi r17,lo8(-(1))
+ 778               	.LVL81:
+ 779 0336 82E0      		ldi r24,2
+ 780 0338 E80E      		add r14,r24
+ 781 033a F11C      		adc r15,__zero_reg__
+ 782 033c 1730      		cpi r17,lo8(7)
+ 783 033e 01F0      		breq .+2
+ 784 0340 00C0      		rjmp .L48
+ 785               	.LVL82:
+ 786               	.L34:
+ 787               	.LBE12:
+ 418:lcd.c         ****         }
+ 419:lcd.c         ****     }
+ 420:lcd.c         **** 
+ 421:lcd.c         ****     // Stay on this page until we get a character.
+ 422:lcd.c         ****     serial_peek (0);
+ 788               		.loc 1 422 0
+ 789 0342 80E0      		ldi r24,0
+ 790 0344 90E0      		ldi r25,0
+ 791 0346 0E94 0000 		call serial_peek
+ 792               	.LVL83:
+ 423:lcd.c         ****     // Set the font to the 6x8.
+ 424:lcd.c         ****     font_set (prefs_font, CMDX_FONT_SET);
+ 793               		.loc 1 424 0
+ 794 034a 68E4      		ldi r22,lo8(72)
+ 795 034c 8091 0000 		lds r24,prefs+11
+ 796 0350 0E94 0000 		call font_set
+ 797               	.LVL84:
+ 798               	/* epilogue start */
+ 425:lcd.c         ****     lcd_screen_clear ();
+ 426:lcd.c         **** }
+ 799               		.loc 1 426 0
+ 800 0354 0F90      		pop __tmp_reg__
+ 801 0356 DF91      		pop r29
+ 802 0358 CF91      		pop r28
+ 803 035a 1F91      		pop r17
+ 804 035c 0F91      		pop r16
+ 805 035e FF90      		pop r15
+ 806 0360 EF90      		pop r14
+ 425:lcd.c         ****     lcd_screen_clear ();
+ 807               		.loc 1 425 0
+ 808 0362 0C94 0000 		jmp lcd_screen_clear
+ 809               	.LVL85:
+ 810               		.cfi_endproc
+ 811               	.LFE17:
+ 813               		.section	.progmem.data,"a",@progbits
+ 816               	label_0.2499:
+ 817 0000 4261 7564 		.string	"Baudrate:"
+ 817      7261 7465 
+ 817      3A00 
+ 820               	label_1.2500:
+ 821 000a 5370 6C61 		.string	"Splash  :"
+ 821      7368 2020 
+ 821      3A00 
+ 824               	label_2.2501:
+ 825 0014 4352 4C46 		.string	"CRLF    :"
+ 825      2020 2020 
+ 825      3A00 
+ 828               	label_3.2502:
+ 829 001e 5363 726F 		.string	"Scroll  :"
+ 829      6C6C 2020 
+ 829      3A00 
+ 832               	label_4.2503:
+ 833 0028 4227 4C69 		.string	"B'Light :"
+ 833      6768 7420 
+ 833      3A00 
+ 836               	label_5.2504:
+ 837 0032 786F 6E2F 		.string	"xon/xoff:"
+ 837      786F 6666 
+ 837      3A00 
+ 840               	label_6.2505:
+ 841 003c 5665 7273 		.string	"Version :"
+ 841      696F 6E20 
+ 841      3A00 
+ 844               	slash.2507:
+ 845 0046 2F00      		.string	"/"
+ 848               	zero2.2508:
+ 849 0048 3030 00   		.string	"00"
+ 852               	baudrates.2498:
+ 853 004b 3000      		.word	48
+ 854 004d 6000      		.word	96
+ 855 004f C000      		.word	192
+ 856 0051 8001      		.word	384
+ 857 0053 4002      		.word	576
+ 858 0055 8004      		.word	1152
+ 861               	labels.2506:
+ 862 0057 0000      		.word	label_0.2499
+ 863 0059 0000      		.word	label_1.2500
+ 864 005b 0000      		.word	label_2.2501
+ 865 005d 0000      		.word	label_3.2502
+ 866 005f 0000      		.word	label_4.2503
+ 867 0061 0000      		.word	label_5.2504
+ 868 0063 0000      		.word	label_6.2505
+ 871               	sparkfun_logo.2461:
+ 872 0065 0A        		.byte	10
+ 873 0066 10        		.byte	16
+ 874 0067 80        		.byte	-128
+ 875 0068 C0        		.byte	-64
+ 876 0069 40        		.byte	64
+ 877 006a 0C        		.byte	12
+ 878 006b 3E        		.byte	62
+ 879 006c FE        		.byte	-2
+ 880 006d F2        		.byte	-14
+ 881 006e E0        		.byte	-32
+ 882 006f F0        		.byte	-16
+ 883 0070 E0        		.byte	-32
+ 884 0071 FF        		.byte	-1
+ 885 0072 7F        		.byte	127
+ 886 0073 3F        		.byte	63
+ 887 0074 1F        		.byte	31
+ 888 0075 1F        		.byte	31
+ 889 0076 1F        		.byte	31
+ 890 0077 1F        		.byte	31
+ 891 0078 0F        		.byte	15
+ 892 0079 07        		.byte	7
+ 893 007a 03        		.byte	3
+ 894               		.comm	line_buffer,16,1
+ 895               		.text
+ 896               	.Letext0:
+ 897               		.file 3 "/usr/local/CrossPack-AVR-20131216/avr/include/stdint.h"
+ 898               		.file 4 "glcd.h"
+ 899               		.file 5 "/usr/local/CrossPack-AVR-20131216/avr/include/avr/eeprom.h"
+DEFINED SYMBOLS
+                            *ABS*:00000000 lcd.c
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:2      *ABS*:0000003e __SP_H__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:3      *ABS*:0000003d __SP_L__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:4      *ABS*:0000003f __SREG__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:5      *ABS*:00000000 __tmp_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:6      *ABS*:00000001 __zero_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:12     .text:00000000 lcd_reset
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:47     .text:00000016 lcd_screen_clear
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:85     .text:00000036 lcd_factory_reset
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:871    .progmem.data:00000065 sparkfun_logo.2461
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:241    .text:000000e0 lcd_set
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:324    .text:0000012e lcd_query
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:462    .text:000001ac lcd_screen_reverse
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:521    .text:000001e0 lcd_demo
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:861    .progmem.data:00000057 labels.2506
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:852    .progmem.data:0000004b baudrates.2498
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:848    .progmem.data:00000048 zero2.2508
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:844    .progmem.data:00000046 slash.2507
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:816    .progmem.data:00000000 label_0.2499
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:820    .progmem.data:0000000a label_1.2500
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:824    .progmem.data:00000014 label_2.2501
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:828    .progmem.data:0000001e label_3.2502
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:832    .progmem.data:00000028 label_4.2503
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:836    .progmem.data:00000032 label_5.2504
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccPZBXIW.s:840    .progmem.data:0000003c label_6.2505
+                            *COM*:00000010 line_buffer
+
+UNDEFINED SYMBOLS
+functabP
+prefs
+font_position
+__eewr_byte_m168
+__eerd_byte_m168
+serial_putc
+consts
+y_dim
+x_dim
+draw_buffer
+sprite_draw
+font_set
+draw_rbox
+font_draw_stringP
+font_draw_number
+font_draw_on_off
+font_draw
+serial_peek
+__do_clear_bss

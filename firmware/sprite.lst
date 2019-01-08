@@ -1,0 +1,749 @@
+   1               		.file	"sprite.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               	.global	sprite_draw
+  12               	sprite_draw:
+  13               	.LFB11:
+  14               		.file 1 "sprite.c"
+   1:sprite.c      **** /* -*- c++ -*- ***************************************************************
+   2:sprite.c      ****  *
+   3:sprite.c      ****  *  System      : Serial GLCD
+   4:sprite.c      ****  *  Module      : Sprite functions
+   5:sprite.c      ****  *  Object Name : $RCSfile: sprite.c,v $
+   6:sprite.c      ****  *  Revision    : $Revision: 1.13 $
+   7:sprite.c      ****  *  Date        : $Date: 2015/05/31 19:12:12 $
+   8:sprite.c      ****  *  Author      : $Author: jon $
+   9:sprite.c      ****  *  Created By  : Jon Green
+  10:sprite.c      ****  *  Created     : Sun Apr 5 08:43:33 2015 Last Modified : <150530.1117>
+  11:sprite.c      ****  *
+  12:sprite.c      ****  *  Description : The main program for driving the serial 160x128 screen
+  13:sprite.c      ****  *
+  14:sprite.c      ****  *  Notes       : Derrived from the 128x64 code by Jennifer Holt and adapted
+  15:sprite.c      ****  *                for the 160x128 screen.
+  16:sprite.c      ****  *
+  17:sprite.c      ****  *  History     :
+  18:sprite.c      ****  *
+  19:sprite.c      ****  *****************************************************************************
+  20:sprite.c      ****  *
+  21:sprite.c      ****  *  Copyright (c) 2010 Jennifer Holt
+  22:sprite.c      ****  *  Copyright (c) 2015 Jon Green
+  23:sprite.c      ****  *
+  24:sprite.c      ****  *  Permission is hereby granted, free of charge, to any person obtaining a
+  25:sprite.c      ****  *  copy of this software and associated documentation files (the "Software"),
+  26:sprite.c      ****  *  to deal in the Software without restriction, including without limitation
+  27:sprite.c      ****  *  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+  28:sprite.c      ****  *  and/or sell copies of the Software, and to permit persons to whom the
+  29:sprite.c      ****  *  Software is furnished to do so, subject to the following conditions:
+  30:sprite.c      ****  *
+  31:sprite.c      ****  *  The above copyright notice and this permission notice shall be included in
+  32:sprite.c      ****  *  all copies or substantial portions of the Software.
+  33:sprite.c      ****  *
+  34:sprite.c      ****  *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  35:sprite.c      ****  *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  36:sprite.c      ****  *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+  37:sprite.c      ****  *  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  38:sprite.c      ****  *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+  39:sprite.c      ****  *  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+  40:sprite.c      ****  *  DEALINGS IN THE SOFTWARE.
+  41:sprite.c      ****  *
+  42:sprite.c      ****  ****************************************************************************/
+  43:sprite.c      **** 
+  44:sprite.c      **** #include <stdlib.h>
+  45:sprite.c      **** #include <string.h>
+  46:sprite.c      **** #include <avr/eeprom.h>
+  47:sprite.c      **** #include <avr/pgmspace.h>
+  48:sprite.c      **** 
+  49:sprite.c      **** #include "glcd.h"
+  50:sprite.c      **** 
+  51:sprite.c      **** // Note: sprites all take SPRITE_SIZE bytes and there are NUM_SPRITES of
+  52:sprite.c      **** // them, but default I set these to 34 and 8 for a total of 272 bytes. this
+  53:sprite.c      **** // is sufficient for 8 16x16 sprites. These can be changed, but watch the
+  54:sprite.c      **** // total memory used. There is only 1k total on the ATmega168.
+  55:sprite.c      **** 
+  56:sprite.c      **** // Sprite is an array to hold sprites, each is SPRITE_BYTES long, each sprite
+  57:sprite.c      **** // has [width],[height],[bunch O' bytes for bitblk] user must make sure data
+  58:sprite.c      **** // is ok, code does not check
+  59:sprite.c      **** //
+  60:sprite.c      **** // Logo modified to use with bitblt, and placed in first sprite.
+  61:sprite.c      **** static uint8_t
+  62:sprite.c      **** sprite [SPRITE_SIZE * NUM_SPRITES];
+  63:sprite.c      **** 
+  64:sprite.c      **** /////////////////////////////////////////////////////////////////////////////
+  65:sprite.c      **** /// Draws the nth sprite at (x,y) using mode.
+  66:sprite.c      **** ///
+  67:sprite.c      **** /// @param [in] x is the first x-coordinate to start drawing.
+  68:sprite.c      **** /// @param [in] y is the first y-coordinate to start drawing.
+  69:sprite.c      **** /// @param [in] sprite_id identifies the sprite to draw.
+  70:sprite.c      **** /// @param [in] s_r The drawing mask.
+  71:sprite.c      **** ///
+  72:sprite.c      **** void
+  73:sprite.c      **** sprite_draw (uint8_t x, uint8_t y, uint8_t sprite_id, uint8_t mode)
+  74:sprite.c      **** {
+  15               		.loc 1 74 0
+  16               		.cfi_startproc
+  17               	.LVL0:
+  18 0000 9F92      		push r9
+  19               	.LCFI0:
+  20               		.cfi_def_cfa_offset 3
+  21               		.cfi_offset 9, -2
+  22 0002 AF92      		push r10
+  23               	.LCFI1:
+  24               		.cfi_def_cfa_offset 4
+  25               		.cfi_offset 10, -3
+  26 0004 BF92      		push r11
+  27               	.LCFI2:
+  28               		.cfi_def_cfa_offset 5
+  29               		.cfi_offset 11, -4
+  30 0006 CF92      		push r12
+  31               	.LCFI3:
+  32               		.cfi_def_cfa_offset 6
+  33               		.cfi_offset 12, -5
+  34 0008 DF92      		push r13
+  35               	.LCFI4:
+  36               		.cfi_def_cfa_offset 7
+  37               		.cfi_offset 13, -6
+  38 000a EF92      		push r14
+  39               	.LCFI5:
+  40               		.cfi_def_cfa_offset 8
+  41               		.cfi_offset 14, -7
+  42 000c FF92      		push r15
+  43               	.LCFI6:
+  44               		.cfi_def_cfa_offset 9
+  45               		.cfi_offset 15, -8
+  46 000e 0F93      		push r16
+  47               	.LCFI7:
+  48               		.cfi_def_cfa_offset 10
+  49               		.cfi_offset 16, -9
+  50 0010 1F93      		push r17
+  51               	.LCFI8:
+  52               		.cfi_def_cfa_offset 11
+  53               		.cfi_offset 17, -10
+  54 0012 CF93      		push r28
+  55               	.LCFI9:
+  56               		.cfi_def_cfa_offset 12
+  57               		.cfi_offset 28, -11
+  58 0014 DF93      		push r29
+  59               	.LCFI10:
+  60               		.cfi_def_cfa_offset 13
+  61               		.cfi_offset 29, -12
+  62 0016 00D0      		rcall .
+  63 0018 1F92      		push __zero_reg__
+  64               	.LCFI11:
+  65               		.cfi_def_cfa_offset 16
+  66 001a CDB7      		in r28,__SP_L__
+  67 001c DEB7      		in r29,__SP_H__
+  68               	.LCFI12:
+  69               		.cfi_def_cfa_register 28
+  70               	/* prologue: function */
+  71               	/* frame size = 3 */
+  72               	/* stack size = 14 */
+  73               	.L__stack_usage = 14
+  74 001e B82E      		mov r11,r24
+  75 0020 A22E      		mov r10,r18
+  75:sprite.c      ****     uint8_t *sprite_ptr;                // Pointer to sprite
+  76:sprite.c      ****     uint8_t width;                      // Sprite width
+  77:sprite.c      ****     uint8_t height;                     // Sprite height
+  78:sprite.c      **** 
+  79:sprite.c      ****     // See what kind of sprite we are dealing with.
+  80:sprite.c      ****     if (sprite_id & 0x80)
+  76               		.loc 1 80 0
+  77 0022 47FF      		sbrs r20,7
+  78 0024 00C0      		rjmp .L2
+  79               	.LBB2:
+  81:sprite.c      ****     {
+  82:sprite.c      ****         // EEPROM based sprite
+  83:sprite.c      ****         uint8_t *eeprom_addr;           // Address in EEPROM
+  84:sprite.c      ****         uint8_t num_bytes;              // The number of bytes in sprite
+  85:sprite.c      ****         uint8_t offset;                 // Offset to write buffer
+  86:sprite.c      **** 
+  87:sprite.c      ****         // Ensure that the sprite_id is valid
+  88:sprite.c      ****         sprite_id &= ~0x80;
+  80               		.loc 1 88 0
+  81 0026 4F77      		andi r20,lo8(127)
+  82               	.LVL1:
+  89:sprite.c      ****         if (sprite_id >= EEPROM_SPRITE_NUM)
+  83               		.loc 1 89 0
+  84 0028 4E30      		cpi r20,lo8(14)
+  85 002a 00F0      		brlo .+2
+  86 002c 00C0      		rjmp .L1
+  90:sprite.c      ****             return;
+  91:sprite.c      **** 
+  92:sprite.c      ****         // Get the EEPROM start address of the sprite
+  93:sprite.c      ****         eeprom_addr = (uint8_t *)(((int)(sprite_id) * EEPROM_SPRITE_SIZE) + EEPROM_ADDR_SPRITE_STAR
+  87               		.loc 1 93 0
+  88 002e 82E2      		ldi r24,lo8(34)
+  89               	.LVL2:
+  90 0030 489F      		mul r20,r24
+  91 0032 6001      		movw r12,r0
+  92 0034 1124      		clr __zero_reg__
+  93               	.LVL3:
+  94:sprite.c      **** 
+  95:sprite.c      ****         // Read the sprite into a buffer.
+  96:sprite.c      ****         width = eeprom_read_byte ((const uint8_t *)(eeprom_addr++));
+  94               		.loc 1 96 0
+  95 0036 C601      		movw r24,r12
+  96 0038 8096      		adiw r24,32
+  97 003a 6B83      		std Y+3,r22
+  98 003c 0E94 0000 		call __eerd_byte_m168
+  99               	.LVL4:
+ 100 0040 F82E      		mov r15,r24
+ 101               	.LVL5:
+  97:sprite.c      ****         height = eeprom_read_byte ((const uint8_t *)(eeprom_addr++));
+ 102               		.loc 1 97 0
+ 103 0042 8601      		movw r16,r12
+ 104 0044 0E5D      		subi r16,-34
+ 105 0046 1F4F      		sbci r17,-1
+ 106               	.LVL6:
+ 107 0048 C601      		movw r24,r12
+ 108 004a 8196      		adiw r24,33
+ 109 004c 0E94 0000 		call __eerd_byte_m168
+ 110               	.LVL7:
+  98:sprite.c      **** 
+  99:sprite.c      ****         // Copy the sprite data into the end of the draw_buffer, this should
+ 100:sprite.c      ****         // not be used by the bitblt operation.
+ 101:sprite.c      ****         num_bytes = width * ((height + 7) >> 3);
+ 111               		.loc 1 101 0
+ 112 0050 E82F      		mov r30,r24
+ 113 0052 F0E0      		ldi r31,0
+ 114 0054 3796      		adiw r30,7
+ 115 0056 93E0      		ldi r25,3
+ 116               		1:
+ 117 0058 F595      		asr r31
+ 118 005a E795      		ror r30
+ 119 005c 9A95      		dec r25
+ 120 005e 01F4      		brne 1b
+ 121 0060 FE9E      		mul r15,r30
+ 122 0062 902C      		mov r9,r0
+ 123 0064 1124      		clr r1
+ 124               	.LVL8:
+ 102:sprite.c      ****         offset = (sizeof(draw_buffer) - 2) - num_bytes;
+ 125               		.loc 1 102 0
+ 126 0066 2EE9      		ldi r18,lo8(-98)
+ 127 0068 2919      		sub r18,r9
+ 128               	.LVL9:
+ 103:sprite.c      ****         sprite_ptr = &draw_buffer [offset];
+ 129               		.loc 1 103 0
+ 130 006a 30E0      		ldi r19,0
+ 131               	.LVL10:
+ 104:sprite.c      **** 
+ 105:sprite.c      ****         // Copy in the data from EEPROM
+ 106:sprite.c      ****         *sprite_ptr++ = width;
+ 132               		.loc 1 106 0
+ 133 006c 2050      		subi r18,lo8(-(draw_buffer))
+ 134 006e 3040      		sbci r19,hi8(-(draw_buffer))
+ 135               	.LVL11:
+ 136 0070 F901      		movw r30,r18
+ 137 0072 F082      		st Z,r15
+ 138               	.LVL12:
+ 107:sprite.c      ****         *sprite_ptr++ = height;
+ 139               		.loc 1 107 0
+ 140 0074 8183      		std Z+1,r24
+ 141 0076 7901      		movw r14,r18
+ 142 0078 F2E0      		ldi r31,2
+ 143 007a EF0E      		add r14,r31
+ 144 007c F11C      		adc r15,__zero_reg__
+ 145               	.LVL13:
+ 108:sprite.c      ****         while (num_bytes-- > 0)
+ 146               		.loc 1 108 0
+ 147 007e 6B81      		ldd r22,Y+3
+ 148               	.LVL14:
+ 149               	.L4:
+ 150               		.loc 1 108 0 is_stmt 0 discriminator 1
+ 151 0080 9A94      		dec r9
+ 152               	.LVL15:
+ 153 0082 FFEF      		ldi r31,lo8(-1)
+ 154 0084 9F16      		cp r9,r31
+ 155 0086 01F0      		breq .L6
+ 109:sprite.c      ****         {
+ 110:sprite.c      ****             *sprite_ptr++ = eeprom_read_byte ((const uint8_t *)(eeprom_addr++));
+ 156               		.loc 1 110 0 is_stmt 1
+ 157 0088 6801      		movw r12,r16
+ 158 008a 8FEF      		ldi r24,-1
+ 159 008c C81A      		sub r12,r24
+ 160 008e D80A      		sbc r13,r24
+ 161               	.LVL16:
+ 162 0090 C801      		movw r24,r16
+ 163 0092 2983      		std Y+1,r18
+ 164 0094 3A83      		std Y+2,r19
+ 165 0096 6B83      		std Y+3,r22
+ 166 0098 0E94 0000 		call __eerd_byte_m168
+ 167               	.LVL17:
+ 168 009c F701      		movw r30,r14
+ 169 009e 8193      		st Z+,r24
+ 170 00a0 7F01      		movw r14,r30
+ 171 00a2 8601      		movw r16,r12
+ 172 00a4 6B81      		ldd r22,Y+3
+ 173 00a6 3A81      		ldd r19,Y+2
+ 174 00a8 2981      		ldd r18,Y+1
+ 175 00aa 00C0      		rjmp .L4
+ 176               	.LVL18:
+ 177               	.L2:
+ 178               	.LBE2:
+ 111:sprite.c      ****         }
+ 112:sprite.c      ****         // Point at the start of the buffer.
+ 113:sprite.c      ****         sprite_ptr = &draw_buffer [offset];
+ 114:sprite.c      ****     }
+ 115:sprite.c      ****     else
+ 116:sprite.c      ****     {
+ 117:sprite.c      ****         // Ensure that the sprite_id is valid
+ 118:sprite.c      ****         if (sprite_id >= NUM_SPRITES)
+ 179               		.loc 1 118 0
+ 180 00ac 4630      		cpi r20,lo8(6)
+ 181 00ae 00F4      		brsh .L1
+ 119:sprite.c      ****             return;
+ 120:sprite.c      **** 
+ 121:sprite.c      ****         // Point to the sprite
+ 122:sprite.c      ****         sprite_ptr = &sprite [sprite_id * SPRITE_SIZE];
+ 182               		.loc 1 122 0
+ 183 00b0 82E2      		ldi r24,lo8(34)
+ 184 00b2 489F      		mul r20,r24
+ 185 00b4 9001      		movw r18,r0
+ 186 00b6 1124      		clr __zero_reg__
+ 187 00b8 2050      		subi r18,lo8(-(sprite))
+ 188 00ba 3040      		sbci r19,hi8(-(sprite))
+ 189               	.LVL19:
+ 190               	.L6:
+ 123:sprite.c      ****     }
+ 124:sprite.c      **** 
+ 125:sprite.c      ****     // If the mode is centre then centre the sprite at the x,y corrdinates.
+ 126:sprite.c      ****     if (mode & MODE_SPRITE_CENTER)
+ 191               		.loc 1 126 0
+ 192 00bc A3FE      		sbrs r10,3
+ 193 00be 00C0      		rjmp .L7
+ 194               	.LVL20:
+ 127:sprite.c      ****     {
+ 128:sprite.c      ****         // Centre the sprite at x,y by adjusting the x,y coordinates.
+ 129:sprite.c      ****         width = (*sprite_ptr++) >> 1;   // Get the width/2
+ 195               		.loc 1 129 0
+ 196 00c0 F901      		movw r30,r18
+ 197 00c2 8081      		ld r24,Z
+ 198 00c4 8695      		lsr r24
+ 199               	.LVL21:
+ 130:sprite.c      ****         if (x > width)
+ 200               		.loc 1 130 0
+ 201 00c6 8B15      		cp r24,r11
+ 202 00c8 00F4      		brsh .L8
+ 131:sprite.c      ****             x -= width;
+ 203               		.loc 1 131 0
+ 204 00ca B81A      		sub r11,r24
+ 205               	.LVL22:
+ 206               	.L8:
+ 132:sprite.c      **** 
+ 133:sprite.c      ****         height = (*sprite_ptr--) >> 1;  // Get the height/2
+ 207               		.loc 1 133 0
+ 208 00cc F901      		movw r30,r18
+ 209 00ce 8181      		ldd r24,Z+1
+ 210               	.LVL23:
+ 211 00d0 8695      		lsr r24
+ 212               	.LVL24:
+ 134:sprite.c      ****         if (y > height)
+ 213               		.loc 1 134 0
+ 214 00d2 8617      		cp r24,r22
+ 215 00d4 00F4      		brsh .L9
+ 135:sprite.c      ****             y -= height;
+ 216               		.loc 1 135 0
+ 217 00d6 681B      		sub r22,r24
+ 218               	.LVL25:
+ 219               	.L9:
+ 136:sprite.c      **** 
+ 137:sprite.c      ****         // Remove the sprite flag so bitblt does not see it.
+ 138:sprite.c      ****         mode &= ~MODE_SPRITE_CENTER;
+ 220               		.loc 1 138 0
+ 221 00d8 FA2D      		mov r31,r10
+ 222 00da F77F      		andi r31,lo8(-9)
+ 223 00dc AF2E      		mov r10,r31
+ 224               	.LVL26:
+ 225               	.L7:
+ 139:sprite.c      ****     }
+ 140:sprite.c      **** 
+ 141:sprite.c      ****     // Display the sprite.
+ 142:sprite.c      ****     draw_vbitblt (x, y, mode, sprite_ptr);
+ 226               		.loc 1 142 0
+ 227 00de 4A2D      		mov r20,r10
+ 228 00e0 8B2D      		mov r24,r11
+ 229               	/* epilogue start */
+ 143:sprite.c      **** }
+ 230               		.loc 1 143 0
+ 231 00e2 0F90      		pop __tmp_reg__
+ 232 00e4 0F90      		pop __tmp_reg__
+ 233 00e6 0F90      		pop __tmp_reg__
+ 234 00e8 DF91      		pop r29
+ 235 00ea CF91      		pop r28
+ 236 00ec 1F91      		pop r17
+ 237 00ee 0F91      		pop r16
+ 238 00f0 FF90      		pop r15
+ 239 00f2 EF90      		pop r14
+ 240 00f4 DF90      		pop r13
+ 241 00f6 CF90      		pop r12
+ 242 00f8 BF90      		pop r11
+ 243               	.LVL27:
+ 244 00fa AF90      		pop r10
+ 245               	.LVL28:
+ 246 00fc 9F90      		pop r9
+ 142:sprite.c      ****     draw_vbitblt (x, y, mode, sprite_ptr);
+ 247               		.loc 1 142 0
+ 248 00fe 0C94 0000 		jmp draw_vbitblt
+ 249               	.LVL29:
+ 250               	.L1:
+ 251               	/* epilogue start */
+ 252               		.loc 1 143 0
+ 253 0102 0F90      		pop __tmp_reg__
+ 254 0104 0F90      		pop __tmp_reg__
+ 255 0106 0F90      		pop __tmp_reg__
+ 256 0108 DF91      		pop r29
+ 257 010a CF91      		pop r28
+ 258 010c 1F91      		pop r17
+ 259 010e 0F91      		pop r16
+ 260 0110 FF90      		pop r15
+ 261 0112 EF90      		pop r14
+ 262 0114 DF90      		pop r13
+ 263 0116 CF90      		pop r12
+ 264 0118 BF90      		pop r11
+ 265               	.LVL30:
+ 266 011a AF90      		pop r10
+ 267               	.LVL31:
+ 268 011c 9F90      		pop r9
+ 269 011e 0895      		ret
+ 270               		.cfi_endproc
+ 271               	.LFE11:
+ 273               	.global	sprite_upload
+ 275               	sprite_upload:
+ 276               	.LFB12:
+ 144:sprite.c      **** 
+ 145:sprite.c      **** /////////////////////////////////////////////////////////////////////////////
+ 146:sprite.c      **** /// Upload the nth sprite. The command collects the data from the serial.
+ 147:sprite.c      **** ///
+ 148:sprite.c      **** /// Send sprite # first 0..(NUM_SPRITES-1), then sprite data
+ 149:sprite.c      **** ///
+ 150:sprite.c      **** /// The sprite format is (char) width (char) height (SPRITE_SIZE-2 char's)
+ 151:sprite.c      **** /// data
+ 152:sprite.c      **** ///
+ 153:sprite.c      **** /// The sprite data is in native bitblt format, ie rows of bytes representing
+ 154:sprite.c      **** /// 8-pixel high vertical stripes
+ 155:sprite.c      **** void
+ 156:sprite.c      **** sprite_upload (uint8_t sprite_id, uint8_t width, uint8_t height)
+ 157:sprite.c      **** {
+ 277               		.loc 1 157 0
+ 278               		.cfi_startproc
+ 279               	.LVL32:
+ 280 0120 CF92      		push r12
+ 281               	.LCFI13:
+ 282               		.cfi_def_cfa_offset 3
+ 283               		.cfi_offset 12, -2
+ 284 0122 DF92      		push r13
+ 285               	.LCFI14:
+ 286               		.cfi_def_cfa_offset 4
+ 287               		.cfi_offset 13, -3
+ 288 0124 EF92      		push r14
+ 289               	.LCFI15:
+ 290               		.cfi_def_cfa_offset 5
+ 291               		.cfi_offset 14, -4
+ 292 0126 FF92      		push r15
+ 293               	.LCFI16:
+ 294               		.cfi_def_cfa_offset 6
+ 295               		.cfi_offset 15, -5
+ 296 0128 0F93      		push r16
+ 297               	.LCFI17:
+ 298               		.cfi_def_cfa_offset 7
+ 299               		.cfi_offset 16, -6
+ 300 012a 1F93      		push r17
+ 301               	.LCFI18:
+ 302               		.cfi_def_cfa_offset 8
+ 303               		.cfi_offset 17, -7
+ 304 012c CF93      		push r28
+ 305               	.LCFI19:
+ 306               		.cfi_def_cfa_offset 9
+ 307               		.cfi_offset 28, -8
+ 308 012e DF93      		push r29
+ 309               	.LCFI20:
+ 310               		.cfi_def_cfa_offset 10
+ 311               		.cfi_offset 29, -9
+ 312 0130 1F92      		push __zero_reg__
+ 313               	.LCFI21:
+ 314               		.cfi_def_cfa_offset 11
+ 315 0132 CDB7      		in r28,__SP_L__
+ 316 0134 DEB7      		in r29,__SP_H__
+ 317               	.LCFI22:
+ 318               		.cfi_def_cfa_register 28
+ 319               	/* prologue: function */
+ 320               	/* frame size = 1 */
+ 321               	/* stack size = 9 */
+ 322               	.L__stack_usage = 9
+ 158:sprite.c      ****     uint8_t sprite_bytes;
+ 159:sprite.c      **** 
+ 160:sprite.c      ****     sprite_bytes = width * ((height + 7) >> 3);
+ 323               		.loc 1 160 0
+ 324 0136 242F      		mov r18,r20
+ 325 0138 30E0      		ldi r19,0
+ 326 013a 295F      		subi r18,-7
+ 327 013c 3F4F      		sbci r19,-1
+ 328 013e 53E0      		ldi r21,3
+ 329               		1:
+ 330 0140 3595      		asr r19
+ 331 0142 2795      		ror r18
+ 332 0144 5A95      		dec r21
+ 333 0146 01F4      		brne 1b
+ 334 0148 629F      		mul r22,r18
+ 335 014a 102D      		mov r17,r0
+ 336 014c 1124      		clr r1
+ 337               	.LVL33:
+ 161:sprite.c      **** 
+ 162:sprite.c      ****     if (sprite_id & 0x80)
+ 338               		.loc 1 162 0
+ 339 014e 87FF      		sbrs r24,7
+ 340 0150 00C0      		rjmp .L15
+ 341               	.LBB3:
+ 163:sprite.c      ****     {
+ 164:sprite.c      ****         // This is a EEPROM based sprite.
+ 165:sprite.c      ****         uint8_t *eeprom_addr;
+ 166:sprite.c      **** 
+ 167:sprite.c      ****         // Ensure that the sprite_id is valid
+ 168:sprite.c      ****         sprite_id &= 0x7f;
+ 342               		.loc 1 168 0
+ 343 0152 8F77      		andi r24,lo8(127)
+ 344               	.LVL34:
+ 345 0154 8E30      		cpi r24,lo8(14)
+ 346 0156 00F0      		brlo .L16
+ 347 0158 8DE0      		ldi r24,lo8(13)
+ 348               	.L16:
+ 349               	.LVL35:
+ 169:sprite.c      ****         if (sprite_id >= EEPROM_SPRITE_NUM)
+ 170:sprite.c      ****             sprite_id = EEPROM_SPRITE_NUM - 1;
+ 171:sprite.c      **** 
+ 172:sprite.c      ****         eeprom_addr = (uint8_t *)(((int)(sprite_id) * EEPROM_SPRITE_SIZE) + EEPROM_ADDR_SPRITE_STAR
+ 350               		.loc 1 172 0
+ 351 015a 92E2      		ldi r25,lo8(34)
+ 352 015c 899F      		mul r24,r25
+ 353 015e 6001      		movw r12,r0
+ 354 0160 1124      		clr __zero_reg__
+ 355               	.LVL36:
+ 173:sprite.c      **** 
+ 174:sprite.c      ****         // Write the sprite into a buffer.
+ 175:sprite.c      ****         eeprom_write_byte (eeprom_addr++, width);
+ 356               		.loc 1 175 0
+ 357 0162 C601      		movw r24,r12
+ 358               	.LVL37:
+ 359 0164 8096      		adiw r24,32
+ 360 0166 4983      		std Y+1,r20
+ 361 0168 0E94 0000 		call __eewr_byte_m168
+ 362               	.LVL38:
+ 176:sprite.c      ****         eeprom_write_byte (eeprom_addr++, height);
+ 363               		.loc 1 176 0
+ 364 016c 4981      		ldd r20,Y+1
+ 365 016e 642F      		mov r22,r20
+ 366 0170 C601      		movw r24,r12
+ 367 0172 8196      		adiw r24,33
+ 368 0174 0E94 0000 		call __eewr_byte_m168
+ 369               	.LVL39:
+ 177:sprite.c      **** 
+ 178:sprite.c      ****         // Read the rest of the data from serial and write to eeprom.
+ 179:sprite.c      ****         if (sprite_bytes > 0)
+ 370               		.loc 1 179 0
+ 371 0178 1123      		tst r17
+ 372 017a 01F0      		breq .L14
+ 176:sprite.c      ****         eeprom_write_byte (eeprom_addr++, height);
+ 373               		.loc 1 176 0
+ 374 017c E2E2      		ldi r30,34
+ 375 017e CE0E      		add r12,r30
+ 376 0180 D11C      		adc r13,__zero_reg__
+ 377               	.LVL40:
+ 378 0182 FC2C      		mov r15,r12
+ 379 0184 F10E      		add r15,r17
+ 380               	.LVL41:
+ 381               	.L19:
+ 180:sprite.c      ****         {
+ 181:sprite.c      ****             do
+ 182:sprite.c      ****             {
+ 183:sprite.c      ****                 eeprom_write_byte (eeprom_addr++, serial_getc ());
+ 382               		.loc 1 183 0 discriminator 1
+ 383 0186 0E94 0000 		call serial_getc
+ 384               	.LVL42:
+ 385 018a 8601      		movw r16,r12
+ 386 018c 0F5F      		subi r16,-1
+ 387 018e 1F4F      		sbci r17,-1
+ 388               	.LVL43:
+ 389 0190 682F      		mov r22,r24
+ 390 0192 C601      		movw r24,r12
+ 391 0194 0E94 0000 		call __eewr_byte_m168
+ 392               	.LVL44:
+ 184:sprite.c      ****             }
+ 185:sprite.c      ****             while (--sprite_bytes > 0);
+ 393               		.loc 1 185 0 discriminator 1
+ 394 0198 F016      		cp r15,r16
+ 395 019a 01F0      		breq .L14
+ 183:sprite.c      ****                 eeprom_write_byte (eeprom_addr++, serial_getc ());
+ 396               		.loc 1 183 0
+ 397 019c 6801      		movw r12,r16
+ 398 019e 00C0      		rjmp .L19
+ 399               	.LVL45:
+ 400               	.L15:
+ 401 01a0 8630      		cpi r24,lo8(6)
+ 402 01a2 00F0      		brlo .L20
+ 403 01a4 85E0      		ldi r24,lo8(5)
+ 404               	.LVL46:
+ 405               	.L20:
+ 406               	.LBE3:
+ 407               	.LBB4:
+ 186:sprite.c      ****         }
+ 187:sprite.c      ****     }
+ 188:sprite.c      ****     else
+ 189:sprite.c      ****     {
+ 190:sprite.c      ****         // This is a RAM based sprite.
+ 191:sprite.c      ****         uint8_t *sprite_addr;
+ 192:sprite.c      **** 
+ 193:sprite.c      ****         if (sprite_id >= NUM_SPRITES)
+ 194:sprite.c      ****             sprite_id = NUM_SPRITES - 1;  // Coerce to valid sprite
+ 195:sprite.c      **** 
+ 196:sprite.c      ****         sprite_addr = &sprite[(int)(sprite_id) * SPRITE_SIZE];
+ 408               		.loc 1 196 0
+ 409 01a6 92E2      		ldi r25,lo8(34)
+ 410 01a8 899F      		mul r24,r25
+ 411 01aa F001      		movw r30,r0
+ 412 01ac 1124      		clr __zero_reg__
+ 413               	.LVL47:
+ 197:sprite.c      **** 
+ 198:sprite.c      ****         // Write the sprite into the buffer
+ 199:sprite.c      ****         *sprite_addr++ = width;
+ 414               		.loc 1 199 0
+ 415 01ae E050      		subi r30,lo8(-(sprite))
+ 416 01b0 F040      		sbci r31,hi8(-(sprite))
+ 417               	.LVL48:
+ 418 01b2 6083      		st Z,r22
+ 419               	.LVL49:
+ 200:sprite.c      ****         *sprite_addr++ = height;
+ 420               		.loc 1 200 0
+ 421 01b4 4183      		std Z+1,r20
+ 201:sprite.c      **** 
+ 202:sprite.c      ****         // Read the rest of the data from serial and write to store.
+ 203:sprite.c      ****         if (sprite_bytes > 0)
+ 422               		.loc 1 203 0
+ 423 01b6 1123      		tst r17
+ 424 01b8 01F0      		breq .L14
+ 200:sprite.c      ****         *sprite_addr++ = height;
+ 425               		.loc 1 200 0
+ 426 01ba 7F01      		movw r14,r30
+ 427 01bc 82E0      		ldi r24,2
+ 428 01be E80E      		add r14,r24
+ 429 01c0 F11C      		adc r15,__zero_reg__
+ 430               	.LVL50:
+ 431 01c2 1E0D      		add r17,r14
+ 432               	.LVL51:
+ 433               	.L21:
+ 204:sprite.c      ****         {
+ 205:sprite.c      ****             do
+ 206:sprite.c      ****             {
+ 207:sprite.c      ****                 *sprite_addr++ = serial_getc ();
+ 434               		.loc 1 207 0 discriminator 1
+ 435 01c4 0E94 0000 		call serial_getc
+ 436               	.LVL52:
+ 437 01c8 F701      		movw r30,r14
+ 438 01ca 8193      		st Z+,r24
+ 439               	.LVL53:
+ 440 01cc 7F01      		movw r14,r30
+ 208:sprite.c      ****             }
+ 209:sprite.c      ****             while (--sprite_bytes > 0);
+ 441               		.loc 1 209 0 discriminator 1
+ 442 01ce 1E13      		cpse r17,r30
+ 443 01d0 00C0      		rjmp .L21
+ 444               	.LVL54:
+ 445               	.L14:
+ 446               	/* epilogue start */
+ 447               	.LBE4:
+ 210:sprite.c      ****         }
+ 211:sprite.c      ****     }
+ 212:sprite.c      **** }
+ 448               		.loc 1 212 0
+ 449 01d2 0F90      		pop __tmp_reg__
+ 450 01d4 DF91      		pop r29
+ 451 01d6 CF91      		pop r28
+ 452 01d8 1F91      		pop r17
+ 453 01da 0F91      		pop r16
+ 454 01dc FF90      		pop r15
+ 455 01de EF90      		pop r14
+ 456 01e0 DF90      		pop r13
+ 457 01e2 CF90      		pop r12
+ 458 01e4 0895      		ret
+ 459               		.cfi_endproc
+ 460               	.LFE12:
+ 462               	.global	sprite_splash
+ 464               	sprite_splash:
+ 465               	.LFB13:
+ 213:sprite.c      **** 
+ 214:sprite.c      **** /////////////////////////////////////////////////////////////////////////////
+ 215:sprite.c      **** /// Toggle the sprite splash screen state
+ 216:sprite.c      **** ///
+ 217:sprite.c      **** /// Toggles whether or not the splash screen is displayed on startup. The
+ 218:sprite.c      **** /// setting is persistent over power cycles.
+ 219:sprite.c      **** void
+ 220:sprite.c      **** sprite_splash (void)
+ 221:sprite.c      **** {
+ 466               		.loc 1 221 0
+ 467               		.cfi_startproc
+ 468               	/* prologue: function */
+ 469               	/* frame size = 0 */
+ 470               	/* stack size = 0 */
+ 471               	.L__stack_usage = 0
+ 222:sprite.c      ****     uint8_t splash;
+ 223:sprite.c      **** 
+ 224:sprite.c      ****     // Increment the splash preference, if it reaches 2 then disable the
+ 225:sprite.c      ****     // splash.
+ 226:sprite.c      ****     splash = prefs_splash;
+ 472               		.loc 1 226 0
+ 473 01e6 4091 0000 		lds r20,prefs+3
+ 474               	.LVL55:
+ 227:sprite.c      ****     if (++splash > 2)
+ 475               		.loc 1 227 0
+ 476 01ea 4F5F      		subi r20,lo8(-(1))
+ 477               	.LVL56:
+ 478 01ec 4330      		cpi r20,lo8(3)
+ 479 01ee 00F0      		brlo .L26
+ 228:sprite.c      ****         splash = 0;
+ 480               		.loc 1 228 0
+ 481 01f0 40E0      		ldi r20,0
+ 482               	.LVL57:
+ 483               	.L26:
+ 229:sprite.c      **** 
+ 230:sprite.c      ****     // Write the splash screen value to the preference and EEPROM.
+ 231:sprite.c      ****     lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_SPLASH, splash);
+ 484               		.loc 1 231 0
+ 485 01f2 63E0      		ldi r22,lo8(3)
+ 486 01f4 85EC      		ldi r24,lo8(-59)
+ 487 01f6 0C94 0000 		jmp lcd_set
+ 488               	.LVL58:
+ 489               		.cfi_endproc
+ 490               	.LFE13:
+ 492               		.local	sprite
+ 493               		.comm	sprite,204,1
+ 494               		.comm	line_buffer,16,1
+ 495               	.Letext0:
+ 496               		.file 2 "glcd.h"
+ 497               		.file 3 "/usr/local/CrossPack-AVR-20131216/avr/include/avr/eeprom.h"
+ 498               		.file 4 "/usr/local/CrossPack-AVR-20131216/avr/include/stdint.h"
+DEFINED SYMBOLS
+                            *ABS*:00000000 sprite.c
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccVPEA1a.s:2      *ABS*:0000003e __SP_H__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccVPEA1a.s:3      *ABS*:0000003d __SP_L__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccVPEA1a.s:4      *ABS*:0000003f __SREG__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccVPEA1a.s:5      *ABS*:00000000 __tmp_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccVPEA1a.s:6      *ABS*:00000001 __zero_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccVPEA1a.s:12     .text:00000000 sprite_draw
+                             .bss:00000000 sprite
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccVPEA1a.s:275    .text:00000120 sprite_upload
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccVPEA1a.s:464    .text:000001e6 sprite_splash
+                            *COM*:00000010 line_buffer
+
+UNDEFINED SYMBOLS
+__eerd_byte_m168
+draw_buffer
+draw_vbitblt
+__eewr_byte_m168
+serial_getc
+prefs
+lcd_set
+__do_clear_bss

@@ -1,0 +1,28 @@
+# -*- Makefile -*-
+# Make rules for Linux
+#
+# Use standard definitions
+include $(TOPDIR)/etc/makeinc.std
+#
+# Host specific definitions
+# 
+TARGETDIR   =   $(UNAME)
+RELDIR	=	/usr/local
+#
+# Set up the compiler Compiler
+#
+include $(TOPDIR)/etc/makeinc.gcc
+#
+# Platform specific defines.
+#
+CPP_PLATDEFS=   -m32 -D_DARWIN -D_UNIX -D_GNU_SOURCE 
+LD_PLATDEFS=    -m32 -framework CoreFoundation -framework CoreServices -framework IOKit 
+#
+# Determine the architecture
+# 
+_ARCHSIZE=$(shell uname -m)
+__ARCHSIZE=$(_ARCHSIZE:x86_64=64)
+___ARCHSIZE=$(__ARCHSIZE:i686=32)
+____ARCHSIZE=$(___ARCHSIZE:i586=32)
+_____ARCHSIZE=$(____ARCHSIZE:i486=32)
+ARCHSIZE=$(_____ARCHSIZE:i386=32)

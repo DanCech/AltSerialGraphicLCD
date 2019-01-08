@@ -1,0 +1,37 @@
+# -*- Makefile -*-
+#
+# GCC Compiler.
+#
+USECC       =       gcc
+CC          =       gcc 
+CPP         =       $(CC) -E
+CPPFLAGS    =       $(CPP_PLATDEFS) $(LOCALDEFS) $(INCLUDES)
+CDEBUGFLAGS =	    -g  -Wall
+CPROFILEFLAGS=      -p1
+COPTIMISEFLAGS=	    -O3 -DNDEBUG=1 -Wall -DNTRACE=1
+C2OPTIMISEFLAGS=    -O2 -DNDEBUG=1 -Wall -DNTRACE=1
+C1OPTIMISEFLAGS=    -O1 -DNDEBUG=1 -Wall -DNTRACE=1
+CNONOPTIMISEFLAGS=  -O0 -DNDEBUG=1 -DNTRACE=1
+#CFLAGS =            $(CPPFLAGS) $(COPTIMISEFLAGS)
+CFLAGS =            $(CPPFLAGS) $(C2OPTIMISEFLAGS)
+#
+# GCC Linker
+#
+LD          =   $(CC) 
+LDFLAGS	    =   $(CFLAGS) $(LD_PLATDEFS)
+#
+# AR flags
+#
+AR		=	ar
+ARFLAGS		=	-rc
+#
+# YACC Flags
+#
+YACC		=	yacc
+YFLAGS		=	-d
+#
+# File Extensions
+O   = o
+A   = a
+EXE =
+I   = -I

@@ -1,0 +1,1512 @@
+   1               		.file	"main.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               	.global	graphics_mode
+  12               	graphics_mode:
+  13               	.LFB11:
+  14               		.file 1 "main.c"
+   1:main.c        **** /* -*- c++ -*- ***************************************************************
+   2:main.c        ****  *
+   3:main.c        ****  *  System      : Serial GLCD
+   4:main.c        ****  *  Module      : Main program
+   5:main.c        ****  *  Object Name : $RCSfile: main.c,v $
+   6:main.c        ****  *  Revision    : $Revision: 1.43 $
+   7:main.c        ****  *  Date        : $Date: 2015/07/05 21:06:58 $
+   8:main.c        ****  *  Author      : $Author: jon $
+   9:main.c        ****  *  Created By  : Jon Green
+  10:main.c        ****  *  Created     : Sun Apr 5 08:43:33 2015 Last Modified : <150612.2223>
+  11:main.c        ****  *
+  12:main.c        ****  *  Description : The main program for driving the serial 160x128 screen
+  13:main.c        ****  *
+  14:main.c        ****  *  Notes       : Derrived from the 128x64 code by Jennifer Holt and adapted
+  15:main.c        ****  *                for both the 128x64 and 160x128 screens.
+  16:main.c        ****  *
+  17:main.c        ****  *  History     :
+  18:main.c        ****  *
+  19:main.c        ****  *****************************************************************************
+  20:main.c        ****  *
+  21:main.c        ****  *  Copyright (c) 2010 Jennifer Holt
+  22:main.c        ****  *  Copyright (c) 2015 Jon Green
+  23:main.c        ****  *
+  24:main.c        ****  *  Permission is hereby granted, free of charge, to any person obtaining a
+  25:main.c        ****  *  copy of this software and associated documentation files (the "Software"),
+  26:main.c        ****  *  to deal in the Software without restriction, including without limitation
+  27:main.c        ****  *  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+  28:main.c        ****  *  and/or sell copies of the Software, and to permit persons to whom the
+  29:main.c        ****  *  Software is furnished to do so, subject to the following conditions:
+  30:main.c        ****  *
+  31:main.c        ****  *  The above copyright notice and this permission notice shall be included in
+  32:main.c        ****  *  all copies or substantial portions of the Software.
+  33:main.c        ****  *
+  34:main.c        ****  *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  35:main.c        ****  *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  36:main.c        ****  *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+  37:main.c        ****  *  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  38:main.c        ****  *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+  39:main.c        ****  *  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+  40:main.c        ****  *  DEALINGS IN THE SOFTWARE.
+  41:main.c        ****  *
+  42:main.c        ****  ****************************************************************************/
+  43:main.c        **** 
+  44:main.c        **** #include <stdlib.h>
+  45:main.c        **** #include <string.h>
+  46:main.c        **** 
+  47:main.c        **** #include <avr/interrupt.h>
+  48:main.c        **** #include <avr/pgmspace.h>
+  49:main.c        **** #include <util/delay.h>		// F_CPU is defined in the makefile
+  50:main.c        **** #include <avr/eeprom.h>
+  51:main.c        **** #include <avr/boot.h>
+  52:main.c        **** #include <avr/wdt.h>                    /* Watchdog timer */
+  53:main.c        **** #include <avr/io.h>
+  54:main.c        **** 
+  55:main.c        **** #include "glcd.h"
+  56:main.c        **** 
+  57:main.c        **** //////////////////////////////////////////////////////////////////////////////
+  58:main.c        **** // Constants
+  59:main.c        **** // 0 - Version major
+  60:main.c        **** // 1 - Version minor
+  61:main.c        **** // 2 - EEPROM Sprite size
+  62:main.c        **** // 3 - EEPROM Sprite number
+  63:main.c        **** // 4 - RAM Sprite size
+  64:main.c        **** // 5 - RAM Sprite number
+  65:main.c        **** const uint8_t consts[6] PROGMEM = 
+  66:main.c        **** {
+  67:main.c        ****     VERSION_MAJOR,                      // Version major
+  68:main.c        ****     VERSION_MINOR,                      // Version minor
+  69:main.c        ****     EEPROM_SPRITE_SIZE,                 // EEPROM Sprite size
+  70:main.c        ****     EEPROM_SPRITE_NUM,                  // EEPROM Sprite number
+  71:main.c        ****     SPRITE_SIZE,                        // RAM Sprite size
+  72:main.c        ****     NUM_SPRITES                         // RAM Sprite number
+  73:main.c        **** };
+  74:main.c        **** 
+  75:main.c        **** /***************************************************************************
+  76:main.c        ****  * Command Handling                                                        *
+  77:main.c        ****  ***************************************************************************/
+  78:main.c        **** 
+  79:main.c        **** // The different screen configurations are driven by a a function look-up
+  80:main.c        **** // table which is statically defined in PROGMEM. This saves us a considerable
+  81:main.c        **** // amount of memory. The pgm_read_* functions are zero over-head as compared
+  82:main.c        **** // with a RAM based table and the pgm_read_* functions disappear to a Flash
+  83:main.c        **** // access and generate the same code size.
+  84:main.c        **** //
+  85:main.c        **** // Different function tables are defined for the T6963 and the KS0108b chips.
+  86:main.c        **** // We use a function table pointer to point to the table that we require and
+  87:main.c        **** // access the functions indirectly through the table.
+  88:main.c        **** //
+  89:main.c        **** // The cmdtable structure provides a look-up table for the command. The
+  90:main.c        **** // tables are separated on function but are all aligned so they use the same
+  91:main.c        **** // index for each table access. The cmdtables are defined as follows:
+  92:main.c        **** //
+  93:main.c        **** // cmdtable_cmdsP - Contains the serial command character.
+  94:main.c        **** //
+  95:main.c        **** // cmdtable_argsP - Contains the arguments of the command.
+  96:main.c        **** //
+  97:main.c        **** // cmdtable_funcsP - Contains the index into the function table of the
+  98:main.c        **** // command to execute.
+  99:main.c        **** //
+ 100:main.c        **** // When a serial command is processed then it is looked up in the
+ 101:main.c        **** // cmdtable_cmdsP table. This lookup is performed with a binary chop on the
+ 102:main.c        **** // table which gives us a an order of logN() look-up time. If a match is
+ 103:main.c        **** // found then the index of the entry is then used to determine the argument
+ 104:main.c        **** // format and the function to invoke is defined in cmdtable_funcsP.
+ 105:main.c        **** 
+ 106:main.c        **** // T6963 function pointers, indexed by the enumerated name
+ 107:main.c        **** static const vfunc_t t6963_functabP [] PROGMEM =
+ 108:main.c        **** {
+ 109:main.c        **** #define DEFFUNC(enum_name, t6963_function, ks0108b_function)     (vfunc_t) t6963_function,
+ 110:main.c        **** #define ENDFUNC(enum_name, t6963_function, ks0108b_function)     (vfunc_t) t6963_function
+ 111:main.c        **** #include "func.def"
+ 112:main.c        **** #undef DEFFUNC
+ 113:main.c        **** #undef ENDFUNC
+ 114:main.c        **** };
+ 115:main.c        **** 
+ 116:main.c        **** // KS0108b function pointers, indexed by the enumerated name
+ 117:main.c        **** static const vfunc_t ks0108b_functabP [] PROGMEM =
+ 118:main.c        **** {
+ 119:main.c        **** #define DEFFUNC(enum_name, t6963_function, ks0108b_function)     (vfunc_t) ks0108b_function,
+ 120:main.c        **** #define ENDFUNC(enum_name, t6963_function, ks0108b_function)     (vfunc_t) ks0108b_function
+ 121:main.c        **** #include "func.def"
+ 122:main.c        **** #undef DEFFUNC
+ 123:main.c        **** #undef ENDFUNC
+ 124:main.c        **** };
+ 125:main.c        **** 
+ 126:main.c        **** // Pointer to the function table in flash
+ 127:main.c        **** const vfunc_t* functabP;
+ 128:main.c        **** 
+ 129:main.c        **** // KS0108b function pointers, indexed by the enumerated name
+ 130:main.c        **** static const vfunc_t cmd_functabP [] PROGMEM =
+ 131:main.c        **** {
+ 132:main.c        **** #define DEFCMDFUNC(enum_name, function)     (vfunc_t) function,
+ 133:main.c        **** #define ENDCMDFUNC(enum_name, function)     (vfunc_t) function
+ 134:main.c        **** #include "func.def"
+ 135:main.c        **** #undef DEFCMDFUNC
+ 136:main.c        **** #undef ENDCMDFUNC
+ 137:main.c        **** };
+ 138:main.c        **** 
+ 139:main.c        **** // Lookup table of serial command codes
+ 140:main.c        **** static const uint8_t cmdtable_cmdsP [] PROGMEM =
+ 141:main.c        **** {
+ 142:main.c        **** #define DEFCMD(enum_value, enum_name, args, func) enum_value,
+ 143:main.c        **** #define ENDCMD(enum_value, enum_name, args, func) enum_value
+ 144:main.c        **** #include "func.def"
+ 145:main.c        **** #undef DEFCMD
+ 146:main.c        **** #undef ENDCMD
+ 147:main.c        **** };
+ 148:main.c        **** 
+ 149:main.c        **** // Look-up table of arguments
+ 150:main.c        **** static const uint8_t cmdtable_argsP [] PROGMEM =
+ 151:main.c        **** {
+ 152:main.c        **** #define DEFCMD(enum_value, enum_name, args, func) args,
+ 153:main.c        **** #define ENDCMD(enum_value, enum_name, args, func) args
+ 154:main.c        **** #include "func.def"
+ 155:main.c        **** #undef DEFCMD
+ 156:main.c        **** #undef ENDCMD
+ 157:main.c        **** };
+ 158:main.c        **** 
+ 159:main.c        **** // Lookup table of functions
+ 160:main.c        **** static const uint8_t cmdtable_funcsP [] PROGMEM =
+ 161:main.c        **** {
+ 162:main.c        **** #define DEFCMD(enum_value, enum_name, args, func) func,
+ 163:main.c        **** #define ENDCMD(enum_value, enum_name, args, func) func
+ 164:main.c        **** #include "func.def"
+ 165:main.c        **** #undef DEFCMD
+ 166:main.c        **** #undef ENDCMD
+ 167:main.c        **** };
+ 168:main.c        **** 
+ 169:main.c        **** uint8_t prefs [PREFS_ADDR_MAX];         // EEPROM preferences.
+ 170:main.c        **** uint8_t x_dim;                          // X dimension
+ 171:main.c        **** uint8_t y_dim;                          // Y dimension
+ 172:main.c        **** 
+ 173:main.c        **** /*
+ 174:main.c        ****  * Bit shift mask - array of masks 0=0xff; 1=0x7f, 2=0x3f etc. Replaces long
+ 175:main.c        ****  * shift operations with lookup table
+ 176:main.c        ****  */
+ 177:main.c        **** const uint8_t bit_shift_maskP[8] PROGMEM =
+ 178:main.c        **** {
+ 179:main.c        ****     0xff, 0x7f, 0x3f, 0x1f, 0x0f, 0x07, 0x03, 0x01
+ 180:main.c        **** };
+ 181:main.c        **** 
+ 182:main.c        **** /*
+ 183:main.c        ****  * Single bit shift mask - array of masks 0=0x01; 1=0x02, 2=0x04 etc. Replaces
+ 184:main.c        ****  * long shift operations with lookup table
+ 185:main.c        ****  */
+ 186:main.c        **** const uint8_t bit_shift_single_maskP[8] PROGMEM =
+ 187:main.c        **** {
+ 188:main.c        ****     0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80
+ 189:main.c        **** };
+ 190:main.c        **** 
+ 191:main.c        **** /*
+ 192:main.c        ****  * Single bit shift mask - array of masks 0=0x80; 1=0x40, 2=0x30 etc. Replaces
+ 193:main.c        ****  * long shift operations with lookup table
+ 194:main.c        ****  */
+ 195:main.c        **** const uint8_t bit_shift_rev_single_maskP[8] PROGMEM =
+ 196:main.c        **** {
+ 197:main.c        ****     0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01
+ 198:main.c        **** };
+ 199:main.c        **** 
+ 200:main.c        **** /////////////////////////////////////////////////////////////////////////////
+ 201:main.c        **** /// Set the graphics mode
+ 202:main.c        **** void
+ 203:main.c        **** graphics_mode (uint8_t cmd)
+ 204:main.c        **** {
+  15               		.loc 1 204 0
+  16               		.cfi_startproc
+  17               	.LVL0:
+  18               	/* prologue: function */
+  19               	/* frame size = 0 */
+  20               	/* stack size = 0 */
+  21               	.L__stack_usage = 0
+ 205:main.c        ****     prefs_graphics = (cmd == CMDX_GRAPHICS_ON) ? 1 : 0;
+  22               		.loc 1 205 0
+  23 0000 91E0      		ldi r25,lo8(1)
+  24 0002 8034      		cpi r24,lo8(64)
+  25 0004 01F0      		breq .L2
+  26 0006 90E0      		ldi r25,0
+  27               	.L2:
+  28 0008 9093 0000 		sts prefs+12,r25
+  29 000c 0895      		ret
+  30               		.cfi_endproc
+  31               	.LFE11:
+  33               		.section	.text.startup,"ax",@progbits
+  34               	.global	main
+  36               	main:
+  37               	.LFB12:
+ 206:main.c        **** }
+ 207:main.c        **** 
+ 208:main.c        **** // The main loop. This performs the initialisation and general operation.
+ 209:main.c        **** int
+ 210:main.c        **** main (void)
+ 211:main.c        **** {
+  38               		.loc 1 211 0
+  39               		.cfi_startproc
+  40 0000 CF93      		push r28
+  41               	.LCFI0:
+  42               		.cfi_def_cfa_offset 3
+  43               		.cfi_offset 28, -2
+  44 0002 DF93      		push r29
+  45               	.LCFI1:
+  46               		.cfi_def_cfa_offset 4
+  47               		.cfi_offset 29, -3
+  48 0004 CDB7      		in r28,__SP_L__
+  49 0006 DEB7      		in r29,__SP_H__
+  50               	.LCFI2:
+  51               		.cfi_def_cfa_register 28
+  52 0008 2797      		sbiw r28,7
+  53               	.LCFI3:
+  54               		.cfi_def_cfa_offset 11
+  55 000a 0FB6      		in __tmp_reg__,__SREG__
+  56 000c F894      		cli
+  57 000e DEBF      		out __SP_H__,r29
+  58 0010 0FBE      		out __SREG__,__tmp_reg__
+  59 0012 CDBF      		out __SP_L__,r28
+  60               	/* prologue: function */
+  61               	/* frame size = 7 */
+  62               	/* stack size = 9 */
+  63               	.L__stack_usage = 9
+ 212:main.c        ****     int cc;
+ 213:main.c        **** 
+ 214:main.c        ****     // Set the watchdog timer for 2 seconds. Note that the lcd_reset()
+ 215:main.c        ****     // function changes the timer to 64ms so this must be reset on input.
+ 216:main.c        ****     cli();                              // Disable interrupts
+  64               		.loc 1 216 0
+  65               	/* #APP */
+  66               	 ;  216 "main.c" 1
+  67 0014 F894      		cli
+  68               	 ;  0 "" 2
+ 217:main.c        ****     /* WDTCSR configuration:
+ 218:main.c        ****      * WDIE = 1 - Interrupt Enable
+ 219:main.c        ****      * WDE =  1 - Reset Enable
+ 220:main.c        ****      * See table for time-out variations:
+ 221:main.c        ****      *@+-----+-----+-----+-----+--------------+
+ 222:main.c        ****      * |WDP 3|WDP 2|WDP 1|WDP 0|Time-out (ms) |
+ 223:main.c        ****      * +-----+-----+-----+-----+--------------+
+ 224:main.c        ****      * |  0  |  0  |  0  |  0  |    16        |
+ 225:main.c        ****      * |  0  |  0  |  0  |  1  |    32        |
+ 226:main.c        ****      * |  0  |  0  |  1  |  0  |    64        |
+ 227:main.c        ****      * |  0  |  0  |  1  |  1  |   125        |
+ 228:main.c        ****      * |  0  |  1  |  0  |  0  |   250        |
+ 229:main.c        ****      * |  0  |  1  |  0  |  1  |   500        |
+ 230:main.c        ****      * |  0  |  1  |  1  |  0  |  1000        |
+ 231:main.c        ****      * |  0  |  1  |  1  |  1  |  2000        |
+ 232:main.c        ****      * |  1  |  0  |  0  |  0  |  4000        |
+ 233:main.c        ****      * |  1  |  0  |  0  |  1  |  8000        |
+ 234:main.c        ****      * +-----+-----+-----+-----+--------------+
+ 235:main.c        ****      */
+ 236:main.c        **** 
+ 237:main.c        ****     // Enter Watchdog Configuration mode
+ 238:main.c        ****     WDTCSR |= (1 << WDCE) | (1 << WDE);
+  69               		.loc 1 238 0
+  70               	/* #NOAPP */
+  71 0016 8091 6000 		lds r24,96
+  72 001a 8861      		ori r24,lo8(24)
+  73 001c 8093 6000 		sts 96,r24
+ 239:main.c        ****     // Set Watchdog settings
+ 240:main.c        ****     WDTCSR = ((1 << WDIE)|(1 << WDE)|(0 << WDP3)|(1 << WDP2)|(1 << WDP1)|(1 << WDP0));
+  74               		.loc 1 240 0
+  75 0020 8FE4      		ldi r24,lo8(79)
+  76 0022 8093 6000 		sts 96,r24
+ 241:main.c        ****     // Enable interrupts
+ 242:main.c        ****     sei();
+  77               		.loc 1 242 0
+  78               	/* #APP */
+  79               	 ;  242 "main.c" 1
+  80 0026 7894      		sei
+  81               	 ;  0 "" 2
+ 243:main.c        **** 
+ 244:main.c        ****     // Read in the EEPROM
+ 245:main.c        ****     memset (prefs, 0, sizeof (prefs));
+  82               		.loc 1 245 0
+  83               	/* #NOAPP */
+  84 0028 8DE0      		ldi r24,lo8(13)
+  85 002a E0E0      		ldi r30,lo8(prefs)
+  86 002c F0E0      		ldi r31,hi8(prefs)
+  87 002e DF01      		movw r26,r30
+  88               		0:
+  89 0030 1D92      		st X+,__zero_reg__
+  90 0032 8A95      		dec r24
+  91 0034 01F4      		brne 0b
+  92               	.LVL1:
+  93 0036 6F01      		movw r12,r30
+ 246:main.c        ****     for (cc = EEPROM_ADDR_MAGIC; cc < EEPROM_ADDR_MAX; cc++)
+  94               		.loc 1 246 0
+  95 0038 00E0      		ldi r16,0
+  96 003a 10E0      		ldi r17,0
+  97               	.LVL2:
+  98               	.L9:
+ 247:main.c        ****         prefs [cc] = eeprom_read_byte ((const uint8_t *)(cc));
+  99               		.loc 1 247 0 discriminator 2
+ 100 003c C801      		movw r24,r16
+ 101 003e 0E94 0000 		call __eerd_byte_m168
+ 102               	.LVL3:
+ 103 0042 F601      		movw r30,r12
+ 104 0044 8193      		st Z+,r24
+ 105 0046 6F01      		movw r12,r30
+ 246:main.c        ****     for (cc = EEPROM_ADDR_MAGIC; cc < EEPROM_ADDR_MAX; cc++)
+ 106               		.loc 1 246 0 discriminator 2
+ 107 0048 0F5F      		subi r16,-1
+ 108 004a 1F4F      		sbci r17,-1
+ 109               	.LVL4:
+ 110 004c 0C30      		cpi r16,12
+ 111 004e 1105      		cpc r17,__zero_reg__
+ 112 0050 01F4      		brne .L9
+ 248:main.c        **** 
+ 249:main.c        ****     // Check for a valid magic, if so then we will accept the content
+ 250:main.c        ****     if (is_invalid_magic() ||
+ 113               		.loc 1 250 0
+ 114 0052 8091 0000 		lds r24,prefs
+ 115 0056 853D      		cpi r24,lo8(-43)
+ 116 0058 01F4      		brne .L10
+ 251:main.c        ****         baud_rate_invalid(prefs_baudrate) ||
+ 117               		.loc 1 251 0 discriminator 1
+ 118 005a 8091 0000 		lds r24,prefs+1
+ 119 005e 8150      		subi r24,lo8(-(-1))
+ 250:main.c        ****     if (is_invalid_magic() ||
+ 120               		.loc 1 250 0 discriminator 1
+ 121 0060 8630      		cpi r24,lo8(6)
+ 122 0062 00F4      		brsh .L10
+ 252:main.c        ****         ((prefs_reverse & ~MODE_NORMAL_MASK) != 0))
+ 123               		.loc 1 252 0
+ 124 0064 8091 0000 		lds r24,prefs+4
+ 125 0068 8E7F      		andi r24,lo8(-2)
+ 251:main.c        ****         baud_rate_invalid(prefs_baudrate) ||
+ 126               		.loc 1 251 0
+ 127 006a 01F0      		breq .L11
+ 128               	.L10:
+ 253:main.c        ****     {
+ 254:main.c        ****         lcd_factory_reset ();
+ 129               		.loc 1 254 0
+ 130 006c 0E94 0000 		call lcd_factory_reset
+ 131               	.LVL5:
+ 132               	.L11:
+ 255:main.c        ****     }
+ 256:main.c        **** 
+ 257:main.c        **** #if 0
+ 258:main.c        ****     // These are the default values, usually these should get read from
+ 259:main.c        ****     // EEPROM, if that does not work for you uncomment these and set them to
+ 260:main.c        ****     // whatever you want.
+ 261:main.c        ****     lcd_factory_reset ();
+ 262:main.c        ****     memset (prefs, 0, sizeof (prefs));
+ 263:main.c        ****     lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_MAGIC, EEPROM_MAGIC);
+ 264:main.c        ****     lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_REVERSE, MODE_NORMAL);
+ 265:main.c        ****     lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_BAUDRATE, BAUD_RATE_DEFAULT);
+ 266:main.c        ****     lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_BACKLIGHT, 100);
+ 267:main.c        ****     lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_XON_POS, RX_BUFFER_XON);
+ 268:main.c        ****     lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_XOFF_POS, RX_BUFFER_XOFF);
+ 269:main.c        ****     lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_LARGE_SCREEN, 0x08);
+ 270:main.c        ****     // 0x08 = Large screen; 0x00 = Small screen
+ 271:main.c        **** #endif
+ 272:main.c        ****     
+ 273:main.c        ****     // The PINB is tempermental on the watchdog reset and returns the
+ 274:main.c        ****     // incorrect value. This has been moved to the lcd_factory_reset() and is
+ 275:main.c        ****     // now written to EEPROM.
+ 276:main.c        ****     if (is_large())
+ 133               		.loc 1 276 0
+ 134 0070 8091 0000 		lds r24,prefs+10
+ 135 0074 8823      		tst r24
+ 136 0076 01F0      		breq .L12
+ 277:main.c        ****     {
+ 278:main.c        ****         // The pin is high, this is a large display. Install the large
+ 279:main.c        ****         // function table.
+ 280:main.c        ****         functabP = t6963_functabP;
+ 137               		.loc 1 280 0
+ 138 0078 80E0      		ldi r24,lo8(t6963_functabP)
+ 139 007a 90E0      		ldi r25,hi8(t6963_functabP)
+ 140 007c 00C0      		rjmp .L58
+ 141               	.L12:
+ 281:main.c        ****     }
+ 282:main.c        ****     else
+ 283:main.c        ****     {
+ 284:main.c        ****         // The pin is low, this is a small display. Install the small
+ 285:main.c        ****         // function table.
+ 286:main.c        ****         functabP = ks0108b_functabP;
+ 142               		.loc 1 286 0
+ 143 007e 80E0      		ldi r24,lo8(ks0108b_functabP)
+ 144 0080 90E0      		ldi r25,hi8(ks0108b_functabP)
+ 145               	.L58:
+ 146 0082 9093 0000 		sts functabP+1,r25
+ 147 0086 8093 0000 		sts functabP,r24
+ 287:main.c        ****     }
+ 288:main.c        **** 
+ 289:main.c        ****     // Set the backlight to the correct level
+ 290:main.c        ****     backlight_init ();                  // Initialise the backlight.
+ 148               		.loc 1 290 0
+ 149 008a 0E94 0000 		call backlight_init
+ 150               	.LVL6:
+ 291:main.c        ****     prefs_backlight = backlight_level (prefs_backlight, 0);
+ 151               		.loc 1 291 0
+ 152 008e 60E0      		ldi r22,0
+ 153 0090 8091 0000 		lds r24,prefs+2
+ 154 0094 0E94 0000 		call backlight_level
+ 155               	.LVL7:
+ 156 0098 8093 0000 		sts prefs+2,r24
+ 157               	.LBB2:
+ 292:main.c        **** 
+ 293:main.c        ****     // Initialise display
+ 294:main.c        ****     ((vfunc_t)(pgm_read_word(&functabP [F_DRV_INIT])))();
+ 158               		.loc 1 294 0
+ 159 009c E091 0000 		lds r30,functabP
+ 160 00a0 F091 0000 		lds r31,functabP+1
+ 161 00a4 3296      		adiw r30,2
+ 162               	.LVL8:
+ 163               	/* #APP */
+ 164               	 ;  294 "main.c" 1
+ 165 00a6 8591      		lpm r24, Z+
+ 166 00a8 9491      		lpm r25, Z
+ 167               		
+ 168               	 ;  0 "" 2
+ 169               	.LVL9:
+ 170               	/* #NOAPP */
+ 171               	.LBE2:
+ 172 00aa FC01      		movw r30,r24
+ 173 00ac 0995      		icall
+ 174               	.LVL10:
+ 295:main.c        **** 
+ 296:main.c        ****     // Initialise the fonts.
+ 297:main.c        ****     font_set (prefs_font, CMDX_FONT_SET);
+ 175               		.loc 1 297 0
+ 176 00ae 68E4      		ldi r22,lo8(72)
+ 177 00b0 8091 0000 		lds r24,prefs+11
+ 178 00b4 0E94 0000 		call font_set
+ 179               	.LVL11:
+ 298:main.c        ****     font_mode (MODE_NORMAL);
+ 180               		.loc 1 298 0
+ 181 00b8 81E0      		ldi r24,lo8(1)
+ 182 00ba 0E94 0000 		call font_mode
+ 183               	.LVL12:
+ 299:main.c        **** 
+ 300:main.c        ****     // Set the drawing modes to an initialised state of normal
+ 301:main.c        ****     drawing_mode = MODE_NORMAL;
+ 184               		.loc 1 301 0
+ 185 00be 81E0      		ldi r24,lo8(1)
+ 186 00c0 8093 0000 		sts drawing_mode,r24
+ 302:main.c        **** 
+ 303:main.c        ****     // Set the baud rate to the user preference
+ 304:main.c        ****     prefs_baudrate = serial_baudrate (prefs_baudrate);
+ 187               		.loc 1 304 0
+ 188 00c4 8091 0000 		lds r24,prefs+1
+ 189 00c8 0E94 0000 		call serial_baudrate
+ 190               	.LVL13:
+ 191 00cc 8093 0000 		sts prefs+1,r24
+ 305:main.c        **** 
+ 306:main.c        ****     // Flush the serial and send the user an XON
+ 307:main.c        ****     serial_flush ();
+ 192               		.loc 1 307 0
+ 193 00d0 0E94 0000 		call serial_flush
+ 194               	.LVL14:
+ 308:main.c        **** 
+ 309:main.c        ****     // Display the splash screen logo this is sprite zero
+ 310:main.c        ****     if (is_splash())
+ 195               		.loc 1 310 0
+ 196 00d4 8091 0000 		lds r24,prefs+3
+ 197 00d8 8823      		tst r24
+ 198 00da 01F0      		breq .L14
+ 311:main.c        ****     {
+ 312:main.c        ****         // Invoke demo mode to display the splash screen. This is not the
+ 313:main.c        ****         // demo command.
+ 314:main.c        ****         lcd_demo (0);
+ 199               		.loc 1 314 0
+ 200 00dc 80E0      		ldi r24,0
+ 201 00de 0E94 0000 		call lcd_demo
+ 202               	.LVL15:
+ 203 00e2 00C0      		rjmp .L15
+ 204               	.L14:
+ 315:main.c        ****     }
+ 316:main.c        ****     else
+ 317:main.c        ****     {
+ 318:main.c        ****         // Clear the screen
+ 319:main.c        ****         lcd_screen_clear ();
+ 205               		.loc 1 319 0
+ 206 00e4 0E94 0000 		call lcd_screen_clear
+ 207               	.LVL16:
+ 208               	.L15:
+ 320:main.c        ****     }
+ 321:main.c        **** 
+ 322:main.c        ****     /***********************************************************************
+ 323:main.c        ****      *                                                                     *
+ 324:main.c        ****      * Main loop                                                           *
+ 325:main.c        ****      *                                                                     *
+ 326:main.c        ****      ***********************************************************************/
+ 327:main.c        **** 
+ 328:main.c        ****     // The main loop waits for characters on the serial port, and either
+ 329:main.c        ****     // prints them, or interprets them as a command
+ 330:main.c        ****     for (;;)
+ 331:main.c        ****     {
+ 332:main.c        **** next_command:
+ 333:main.c        ****         // Get a byte from the serial port and parse it.
+ 334:main.c        ****         cc = serial_getc();
+ 209               		.loc 1 334 0
+ 210 00e8 0E94 0000 		call serial_getc
+ 211               	.LVL17:
+ 212 00ec 082F      		mov r16,r24
+ 213 00ee 10E0      		ldi r17,0
+ 214               	.LVL18:
+ 335:main.c        **** 
+ 336:main.c        ****         // Deterimine our operational mode, if we are in a grapics mode then
+ 337:main.c        ****         // we only process commands, otherwise we look for text to render.
+ 338:main.c        ****         if (!is_graphics())
+ 215               		.loc 1 338 0
+ 216 00f0 8091 0000 		lds r24,prefs+12
+ 217 00f4 8111      		cpse r24,__zero_reg__
+ 218 00f6 00C0      		rjmp .L25
+ 339:main.c        ****         {
+ 340:main.c        ****             // We are in non-graphcis mode, process the character
+ 341:main.c        ****             if (cc < ' ')
+ 219               		.loc 1 341 0
+ 220 00f8 0032      		cpi r16,32
+ 221 00fa 1105      		cpc r17,__zero_reg__
+ 222 00fc 04F4      		brge .L20
+ 342:main.c        ****             {
+ 343:main.c        ****                 // Process any special control characters.
+ 344:main.c        ****                 if (cc >= CHAR_LF)
+ 223               		.loc 1 344 0
+ 224 00fe 0A30      		cpi r16,10
+ 225 0100 1105      		cpc r17,__zero_reg__
+ 226 0102 04F0      		brlt .L21
+ 345:main.c        ****                 {
+ 346:main.c        ****                     // LF move to next row
+ 347:main.c        ****                     if (cc == CHAR_LF)
+ 227               		.loc 1 347 0
+ 228 0104 0A30      		cpi r16,10
+ 229 0106 1105      		cpc r17,__zero_reg__
+ 230 0108 01F4      		brne .L22
+ 348:main.c        ****                         font_lf ();
+ 231               		.loc 1 348 0
+ 232 010a 0E94 0000 		call font_lf
+ 233               	.LVL19:
+ 234 010e 00C0      		rjmp .L15
+ 235               	.L22:
+ 349:main.c        ****                     // CR, reset to start of row
+ 350:main.c        ****                     else if (cc == CHAR_CR)
+ 236               		.loc 1 350 0
+ 237 0110 0D30      		cpi r16,13
+ 238 0112 1105      		cpc r17,__zero_reg__
+ 239 0114 01F4      		brne .L15
+ 351:main.c        ****                         font_cr ();
+ 240               		.loc 1 351 0
+ 241 0116 0E94 0000 		call font_cr
+ 242               	.LVL20:
+ 243 011a 00C0      		rjmp .L15
+ 244               	.L21:
+ 352:main.c        ****                 }
+ 353:main.c        ****                 else
+ 354:main.c        ****                 {
+ 355:main.c        ****                     // Backspace
+ 356:main.c        ****                     if (cc == CHAR_BACKSPACE)
+ 245               		.loc 1 356 0
+ 246 011c 0830      		cpi r16,8
+ 247 011e 1105      		cpc r17,__zero_reg__
+ 248 0120 01F4      		brne .L15
+ 357:main.c        ****                         font_backspace ();
+ 249               		.loc 1 357 0
+ 250 0122 0E94 0000 		call font_backspace
+ 251               	.LVL21:
+ 252 0126 00C0      		rjmp .L15
+ 253               	.L20:
+ 358:main.c        ****                 }
+ 359:main.c        ****                 // We ignore anything else and do not draw it.
+ 360:main.c        ****             }
+ 361:main.c        ****             else
+ 362:main.c        ****             {
+ 363:main.c        ****                 // See if this is a control character.
+ 364:main.c        ****                 if (cc == CHAR_COMMAND)
+ 254               		.loc 1 364 0
+ 255 0128 0C37      		cpi r16,124
+ 256 012a 1105      		cpc r17,__zero_reg__
+ 257 012c 01F4      		brne .L24
+ 365:main.c        ****                 {
+ 366:main.c        ****                     // Received character indicated a coming command. Get the
+ 367:main.c        ****                     // command character and process it.
+ 368:main.c        ****                     cc = serial_getc();
+ 258               		.loc 1 368 0
+ 259 012e 0E94 0000 		call serial_getc
+ 260               	.LVL22:
+ 261 0132 082F      		mov r16,r24
+ 262               	.LVL23:
+ 263 0134 10E0      		ldi r17,0
+ 264               	.LVL24:
+ 369:main.c        **** 
+ 370:main.c        ****                     // If the character is not the command character then process
+ 371:main.c        ****                     // as a command.
+ 372:main.c        ****                     if (cc != CHAR_COMMAND)
+ 265               		.loc 1 372 0
+ 266 0136 0C37      		cpi r16,124
+ 267 0138 1105      		cpc r17,__zero_reg__
+ 268 013a 01F4      		brne .L25
+ 269               	.L24:
+ 270               	.LVL25:
+ 373:main.c        ****                         goto graphics_command;
+ 374:main.c        ****                 }
+ 375:main.c        **** 
+ 376:main.c        ****                 // Otherwise draw the character
+ 377:main.c        ****                 font_draw (cc);
+ 271               		.loc 1 377 0
+ 272 013c 802F      		mov r24,r16
+ 273 013e 0E94 0000 		call font_draw
+ 274               	.LVL26:
+ 275 0142 00C0      		rjmp .L15
+ 276               	.LVL27:
+ 277               	.L44:
+ 278               	.LBB3:
+ 279               	.LBB4:
+ 378:main.c        ****             }
+ 379:main.c        ****         }
+ 380:main.c        **** 
+ 381:main.c        ****         /////////////////////////////////////////////////////////////////////
+ 382:main.c        ****         // Graphics command                                                //
+ 383:main.c        ****         /////////////////////////////////////////////////////////////////////
+ 384:main.c        ****         else
+ 385:main.c        ****         {
+ 386:main.c        **** graphics_command:
+ 387:main.c        **** 
+ 388:main.c        ****             // Find the command by performing a binary chop operation on the
+ 389:main.c        ****             // command table. This gives us the index of the function. We
+ 390:main.c        ****             // then use the argument table to determine the arguments of the
+ 391:main.c        ****             // call before finalling invoking the function indirectly via the
+ 392:main.c        ****             // function table.
+ 393:main.c        ****             {
+ 394:main.c        ****                 int8_t hi = sizeof(cmdtable_cmdsP) - 1; // Hi watermark
+ 395:main.c        ****                 int8_t lo = 0;                          // Lo watermark
+ 396:main.c        **** 
+ 397:main.c        ****                 do
+ 398:main.c        ****                 {
+ 399:main.c        ****                     // Find the entry from the middle of the command table
+ 400:main.c        ****                     int8_t  mid  = (lo + hi) >> 1;      // Get the mid value
+ 280               		.loc 1 400 0
+ 281 0144 842F      		mov r24,r20
+ 282 0146 9927      		clr r25
+ 283 0148 87FD      		sbrc r24,7
+ 284 014a 9095      		com r25
+ 285 014c 850F      		add r24,r21
+ 286 014e 911D      		adc r25,__zero_reg__
+ 287 0150 57FD      		sbrc r21,7
+ 288 0152 9A95      		dec r25
+ 289 0154 9595      		asr r25
+ 290 0156 8795      		ror r24
+ 291               	.LVL28:
+ 292               	.LBB5:
+ 401:main.c        ****                     uint8_t tcmd = pgm_read_byte (&cmdtable_cmdsP[mid]);
+ 293               		.loc 1 401 0
+ 294 0158 282F      		mov r18,r24
+ 295 015a 3327      		clr r19
+ 296 015c 27FD      		sbrc r18,7
+ 297 015e 3095      		com r19
+ 298               	.LVL29:
+ 299 0160 F901      		movw r30,r18
+ 300 0162 E050      		subi r30,lo8(-(cmdtable_cmdsP))
+ 301 0164 F040      		sbci r31,hi8(-(cmdtable_cmdsP))
+ 302               	.LVL30:
+ 303               	/* #APP */
+ 304               	 ;  401 "main.c" 1
+ 305 0166 E491      		lpm r30, Z
+ 306               		
+ 307               	 ;  0 "" 2
+ 308               	.LVL31:
+ 309               	/* #NOAPP */
+ 310               	.LBE5:
+ 402:main.c        **** 
+ 403:main.c        ****                     if (cc == tcmd)
+ 311               		.loc 1 403 0
+ 312 0168 F0E0      		ldi r31,0
+ 313 016a 0E17      		cp r16,r30
+ 314 016c 1F07      		cpc r17,r31
+ 315 016e 01F0      		breq .L59
+ 404:main.c        ****                     {
+ 405:main.c        **** #define argc hi                         /* Re-use the variable */
+ 406:main.c        **** #define argf lo                         /* Re-use the variable */
+ 407:main.c        ****                         void *func = pgm_read_word(&cmd_functabP[pgm_read_byte (&cmdtable_funcsP[mi
+ 408:main.c        ****                         uint8_t argv[6];
+ 409:main.c        **** 
+ 410:main.c        ****                         argf = pgm_read_byte (&cmdtable_argsP[mid]);
+ 411:main.c        ****                         argc = 0;
+ 412:main.c        **** 
+ 413:main.c        ****                         // Get any pre arguments that need to be pushed
+ 414:main.c        ****                         // before arguments acquired over the serial port.
+ 415:main.c        ****                         if (argf & FUNC_PRE_DRAW_MODE)
+ 416:main.c        ****                             argv[argc++] = drawing_mode;
+ 417:main.c        **** 
+ 418:main.c        ****                         // Get the arguments from serial. */
+ 419:main.c        ****                         while (argc < (argf & FUNC_ARGC_MASK))
+ 420:main.c        ****                             argv[argc++] = serial_getc ();
+ 421:main.c        **** 
+ 422:main.c        ****                         // Set any default arguments
+ 423:main.c        ****                         if (argf & FUNC_DRAW_ZERO)
+ 424:main.c        ****                             argv[argc++] = 0;
+ 425:main.c        ****                         if (argf & FUNC_FILL_CMD)
+ 426:main.c        ****                             argv[argc++] = cc;
+ 427:main.c        ****                         if (argf & FUNC_DRAW_MODE)
+ 428:main.c        ****                             argv[argc++] = drawing_mode;
+ 429:main.c        **** 
+ 430:main.c        ****                         // Manually perform a binary chop on the number of
+ 431:main.c        ****                         // arguments to set up the function call.
+ 432:main.c        ****                         // Unfortunately there is no way that I know of in
+ 433:main.c        ****                         // 'C' to manually buld a stack frame. I would have
+ 434:main.c        ****                         // to drop down to assembler to do this a bit more
+ 435:main.c        ****                         // efficiently and it is not that critical to devote
+ 436:main.c        ****                         // my time to sorting this out.
+ 437:main.c        ****                         if (argc <= 3)
+ 438:main.c        ****                         {
+ 439:main.c        ****                             // 3 or less arguments.
+ 440:main.c        ****                             if (argc <= 1)
+ 441:main.c        ****                             {
+ 442:main.c        ****                                 // Zero or 1 argument.
+ 443:main.c        ****                                 if (argc == 0)
+ 444:main.c        ****                                     ((vfunc_t) func)();
+ 445:main.c        ****                                 else
+ 446:main.c        ****                                     ((vfunc_i_t) func)(argv[0]);
+ 447:main.c        ****                             }
+ 448:main.c        ****                             else
+ 449:main.c        ****                             {
+ 450:main.c        ****                                 // 2 or 3 arguments. Noted a special case of
+ 451:main.c        ****                                 // arguments if we have a FUNC_DRAW_NULL
+ 452:main.c        ****                                 // which is a special pointer argument of
+ 453:main.c        ****                                 // NULL
+ 454:main.c        ****                                 if (argc == 2)
+ 455:main.c        ****                                     ((vfunc_ii_t) func)(argv[0], argv[1]);
+ 456:main.c        ****                                 else
+ 457:main.c        ****                                 {
+ 458:main.c        ****                                     // All of the NULL terminated commands are 4 bytes long.
+ 459:main.c        ****                                     if (argf & FUNC_DRAW_NULL)
+ 460:main.c        ****                                         ((vfunc_iiip_t) func)(argv[0], argv[1], argv[2], NULL);
+ 461:main.c        ****                                     else
+ 462:main.c        ****                                         ((vfunc_iii_t) func)(argv[0], argv[1], argv[2]);
+ 463:main.c        ****                                 }
+ 464:main.c        ****                             }
+ 465:main.c        ****                         }
+ 466:main.c        ****                         else
+ 467:main.c        ****                         {
+ 468:main.c        ****                             // 4 or more arguments
+ 469:main.c        ****                             if (argc <= 5)
+ 470:main.c        ****                             {
+ 471:main.c        ****                                 // 4 or 5 arguments
+ 472:main.c        ****                                 if (argc == 5)
+ 473:main.c        ****                                     ((vfunc_iiiii_t) func)(argv[0], argv[1], argv[2], argv[3], argv
+ 474:main.c        ****                                 else
+ 475:main.c        ****                                     ((vfunc_iiii_t) func)(argv[0], argv[1], argv[2], argv[3]);
+ 476:main.c        ****                             }
+ 477:main.c        ****                             else
+ 478:main.c        ****                             {
+ 479:main.c        ****                                 // 6 arguments.
+ 480:main.c        ****                                 ((vfunc_iiiiii_t) func)(argv[0], argv[1], argv[2], argv[3], argv[4]
+ 481:main.c        ****                             }
+ 482:main.c        ****                         }
+ 483:main.c        **** 
+ 484:main.c        ****                         // The command has been executed. Move onto the next command.
+ 485:main.c        ****                         goto next_command;
+ 486:main.c        ****                     }
+ 487:main.c        ****                     else if (cc > tcmd) // Binary chop - work out which part of table to keep
+ 316               		.loc 1 487 0
+ 317 0170 E017      		cp r30,r16
+ 318 0172 F107      		cpc r31,r17
+ 319 0174 04F0      		brlt .+2
+ 320 0176 00C0      		rjmp .L41
+ 488:main.c        ****                         lo = mid + 1;   // Discard top half
+ 321               		.loc 1 488 0
+ 322 0178 51E0      		ldi r21,lo8(1)
+ 323               	.LVL32:
+ 324 017a 580F      		add r21,r24
+ 325               	.LVL33:
+ 326               	.L42:
+ 327               	.LBE4:
+ 489:main.c        ****                     else
+ 490:main.c        ****                         hi = mid - 1;   // Discard bottom half
+ 491:main.c        **** #undef argc                             /* Re-use the variable */
+ 492:main.c        **** #undef argf                             /* Re-use the variable */
+ 493:main.c        ****                 }
+ 494:main.c        ****                 // Continue the binary chop until we run out of entries to
+ 495:main.c        ****                 // chop.
+ 496:main.c        ****                 while (lo <= hi);
+ 328               		.loc 1 496 0
+ 329 017c 4517      		cp r20,r21
+ 330 017e 04F4      		brge .L44
+ 331               	.LBE3:
+ 497:main.c        ****             }
+ 498:main.c        **** 
+ 499:main.c        ****             // At this point the command character is not recognised or
+ 500:main.c        ****             // processed. Where we have received a command character
+ 501:main.c        ****             // indicated a coming command. We are in the wrong mode, flip
+ 502:main.c        ****             // back to a non-graphics mode and process.
+ 503:main.c        ****             if (cc == CHAR_COMMAND)
+ 332               		.loc 1 503 0
+ 333 0180 0C37      		cpi r16,124
+ 334 0182 1105      		cpc r17,__zero_reg__
+ 335 0184 01F0      		breq .+2
+ 336 0186 00C0      		rjmp .L15
+ 504:main.c        ****             {
+ 505:main.c        ****                 // Drop out of graphics mode as we have received a command character.
+ 506:main.c        ****                 prefs_graphics = 0;
+ 337               		.loc 1 506 0
+ 338 0188 1092 0000 		sts prefs+12,__zero_reg__
+ 507:main.c        **** 
+ 508:main.c        ****                 // Get the command character and then go and process it.
+ 509:main.c        ****                 cc = serial_getc();
+ 339               		.loc 1 509 0
+ 340 018c 0E94 0000 		call serial_getc
+ 341               	.LVL34:
+ 342 0190 082F      		mov r16,r24
+ 343               	.LVL35:
+ 344 0192 10E0      		ldi r17,0
+ 345               	.LVL36:
+ 346               	.L25:
+ 347               	.LBB11:
+ 395:main.c        ****                 int8_t lo = 0;                          // Lo watermark
+ 348               		.loc 1 395 0
+ 349 0194 50E0      		ldi r21,0
+ 394:main.c        ****                 int8_t hi = sizeof(cmdtable_cmdsP) - 1; // Hi watermark
+ 350               		.loc 1 394 0
+ 351 0196 4AE2      		ldi r20,lo8(42)
+ 352 0198 00C0      		rjmp .L44
+ 353               	.LVL37:
+ 354               	.L59:
+ 355               	.LBB10:
+ 356               	.LBB6:
+ 357               	.LBB7:
+ 358               	.LBB8:
+ 407:main.c        ****                         void *func = pgm_read_word(&cmd_functabP[pgm_read_byte (&cmdtable_funcsP[mi
+ 359               		.loc 1 407 0
+ 360 019a F901      		movw r30,r18
+ 361               	.LVL38:
+ 362 019c E050      		subi r30,lo8(-(cmdtable_funcsP))
+ 363 019e F040      		sbci r31,hi8(-(cmdtable_funcsP))
+ 364               	.LVL39:
+ 365               	/* #APP */
+ 366               	 ;  407 "main.c" 1
+ 367 01a0 E491      		lpm r30, Z
+ 368               		
+ 369               	 ;  0 "" 2
+ 370               	.LVL40:
+ 371               	/* #NOAPP */
+ 372               	.LBE8:
+ 373 01a2 F0E0      		ldi r31,0
+ 374 01a4 EE0F      		lsl r30
+ 375 01a6 FF1F      		rol r31
+ 376               	.LVL41:
+ 377 01a8 E050      		subi r30,lo8(-(cmd_functabP))
+ 378 01aa F040      		sbci r31,hi8(-(cmd_functabP))
+ 379               	.LVL42:
+ 380               	/* #APP */
+ 381               	 ;  407 "main.c" 1
+ 382 01ac C590      		lpm r12, Z+
+ 383 01ae D490      		lpm r13, Z
+ 384               		
+ 385               	 ;  0 "" 2
+ 386               	.LVL43:
+ 387               	/* #NOAPP */
+ 388               	.LBE7:
+ 389               	.LBB9:
+ 410:main.c        ****                         argf = pgm_read_byte (&cmdtable_argsP[mid]);
+ 390               		.loc 1 410 0
+ 391 01b0 F901      		movw r30,r18
+ 392 01b2 E050      		subi r30,lo8(-(cmdtable_argsP))
+ 393 01b4 F040      		sbci r31,hi8(-(cmdtable_argsP))
+ 394               	.LVL44:
+ 395               	/* #APP */
+ 396               	 ;  410 "main.c" 1
+ 397 01b6 F490      		lpm r15, Z
+ 398               		
+ 399               	 ;  0 "" 2
+ 400               	.LVL45:
+ 401               	/* #NOAPP */
+ 402               	.LBE9:
+ 415:main.c        ****                         if (argf & FUNC_PRE_DRAW_MODE)
+ 403               		.loc 1 415 0
+ 404 01b8 F3FE      		sbrs r15,3
+ 405 01ba 00C0      		rjmp .L45
+ 406               	.LVL46:
+ 416:main.c        ****                             argv[argc++] = drawing_mode;
+ 407               		.loc 1 416 0
+ 408 01bc 8091 0000 		lds r24,drawing_mode
+ 409 01c0 8983      		std Y+1,r24
+ 410 01c2 91E0      		ldi r25,lo8(1)
+ 411 01c4 00C0      		rjmp .L27
+ 412               	.LVL47:
+ 413               	.L45:
+ 411:main.c        ****                         argc = 0;
+ 414               		.loc 1 411 0
+ 415 01c6 90E0      		ldi r25,0
+ 416               	.LVL48:
+ 417               	.L27:
+ 419:main.c        ****                         while (argc < (argf & FUNC_ARGC_MASK))
+ 418               		.loc 1 419 0 discriminator 1
+ 419 01c8 FF2D      		mov r31,r15
+ 420 01ca F770      		andi r31,lo8(7)
+ 421 01cc EF2E      		mov r14,r31
+ 422               	.LVL49:
+ 423               	.L28:
+ 424 01ce 9E15      		cp r25,r14
+ 425 01d0 04F4      		brge .L60
+ 426 01d2 BB24      		clr r11
+ 427 01d4 B394      		inc r11
+ 428 01d6 B90E      		add r11,r25
+ 429               	.LVL50:
+ 420:main.c        ****                             argv[argc++] = serial_getc ();
+ 430               		.loc 1 420 0
+ 431 01d8 9F83      		std Y+7,r25
+ 432 01da 0E94 0000 		call serial_getc
+ 433               	.LVL51:
+ 434 01de 9F81      		ldd r25,Y+7
+ 435 01e0 A1E0      		ldi r26,lo8(1)
+ 436 01e2 B0E0      		ldi r27,0
+ 437 01e4 AC0F      		add r26,r28
+ 438 01e6 BD1F      		adc r27,r29
+ 439 01e8 A90F      		add r26,r25
+ 440 01ea B11D      		adc r27,__zero_reg__
+ 441 01ec 97FD      		sbrc r25,7
+ 442 01ee BA95      		dec r27
+ 443 01f0 8C93      		st X,r24
+ 444 01f2 9B2D      		mov r25,r11
+ 445 01f4 00C0      		rjmp .L28
+ 446               	.LVL52:
+ 447               	.L60:
+ 448 01f6 892F      		mov r24,r25
+ 423:main.c        ****                         if (argf & FUNC_DRAW_ZERO)
+ 449               		.loc 1 423 0
+ 450 01f8 F5FE      		sbrs r15,5
+ 451 01fa 00C0      		rjmp .L30
+ 452               	.LVL53:
+ 424:main.c        ****                             argv[argc++] = 0;
+ 453               		.loc 1 424 0
+ 454 01fc 9F5F      		subi r25,lo8(-(1))
+ 455               	.LVL54:
+ 456 01fe A1E0      		ldi r26,lo8(1)
+ 457 0200 B0E0      		ldi r27,0
+ 458 0202 AC0F      		add r26,r28
+ 459 0204 BD1F      		adc r27,r29
+ 460 0206 A80F      		add r26,r24
+ 461 0208 B11D      		adc r27,__zero_reg__
+ 462 020a 87FD      		sbrc r24,7
+ 463 020c BA95      		dec r27
+ 464 020e 1C92      		st X,__zero_reg__
+ 465               	.L30:
+ 425:main.c        ****                         if (argf & FUNC_FILL_CMD)
+ 466               		.loc 1 425 0
+ 467 0210 F7FE      		sbrs r15,7
+ 468 0212 00C0      		rjmp .L31
+ 469               	.LVL55:
+ 426:main.c        ****                             argv[argc++] = cc;
+ 470               		.loc 1 426 0
+ 471 0214 A1E0      		ldi r26,lo8(1)
+ 472 0216 B0E0      		ldi r27,0
+ 473 0218 AC0F      		add r26,r28
+ 474 021a BD1F      		adc r27,r29
+ 475 021c A90F      		add r26,r25
+ 476 021e B11D      		adc r27,__zero_reg__
+ 477 0220 97FD      		sbrc r25,7
+ 478 0222 BA95      		dec r27
+ 479 0224 0C93      		st X,r16
+ 480 0226 9F5F      		subi r25,lo8(-(1))
+ 481               	.LVL56:
+ 482               	.L31:
+ 427:main.c        ****                         if (argf & FUNC_DRAW_MODE)
+ 483               		.loc 1 427 0
+ 484 0228 F6FE      		sbrs r15,6
+ 485 022a 00C0      		rjmp .L32
+ 486               	.LVL57:
+ 428:main.c        ****                             argv[argc++] = drawing_mode;
+ 487               		.loc 1 428 0
+ 488 022c A1E0      		ldi r26,lo8(1)
+ 489 022e B0E0      		ldi r27,0
+ 490 0230 AC0F      		add r26,r28
+ 491 0232 BD1F      		adc r27,r29
+ 492 0234 A90F      		add r26,r25
+ 493 0236 B11D      		adc r27,__zero_reg__
+ 494 0238 97FD      		sbrc r25,7
+ 495 023a BA95      		dec r27
+ 496 023c 8091 0000 		lds r24,drawing_mode
+ 497 0240 8C93      		st X,r24
+ 498 0242 9F5F      		subi r25,lo8(-(1))
+ 499               	.LVL58:
+ 500               	.L32:
+ 437:main.c        ****                         if (argc <= 3)
+ 501               		.loc 1 437 0
+ 502 0244 9430      		cpi r25,lo8(4)
+ 503 0246 04F4      		brge .L33
+ 440:main.c        ****                             if (argc <= 1)
+ 504               		.loc 1 440 0
+ 505 0248 9230      		cpi r25,lo8(2)
+ 506 024a 04F4      		brge .L34
+ 443:main.c        ****                                 if (argc == 0)
+ 507               		.loc 1 443 0
+ 508 024c 9111      		cpse r25,__zero_reg__
+ 509 024e 00C0      		rjmp .L35
+ 444:main.c        ****                                     ((vfunc_t) func)();
+ 510               		.loc 1 444 0
+ 511 0250 F601      		movw r30,r12
+ 512 0252 0995      		icall
+ 513               	.LVL59:
+ 514 0254 00C0      		rjmp .L15
+ 515               	.LVL60:
+ 516               	.L35:
+ 446:main.c        ****                                     ((vfunc_i_t) func)(argv[0]);
+ 517               		.loc 1 446 0
+ 518 0256 8981      		ldd r24,Y+1
+ 519 0258 F601      		movw r30,r12
+ 520 025a 0995      		icall
+ 521               	.LVL61:
+ 522 025c 00C0      		rjmp .L15
+ 523               	.LVL62:
+ 524               	.L34:
+ 454:main.c        ****                                 if (argc == 2)
+ 525               		.loc 1 454 0
+ 526 025e 9230      		cpi r25,lo8(2)
+ 527 0260 01F4      		brne .L37
+ 455:main.c        ****                                     ((vfunc_ii_t) func)(argv[0], argv[1]);
+ 528               		.loc 1 455 0
+ 529 0262 6A81      		ldd r22,Y+2
+ 530 0264 8981      		ldd r24,Y+1
+ 531 0266 F601      		movw r30,r12
+ 532 0268 0995      		icall
+ 533               	.LVL63:
+ 534 026a 00C0      		rjmp .L15
+ 535               	.LVL64:
+ 536               	.L37:
+ 459:main.c        ****                                     if (argf & FUNC_DRAW_NULL)
+ 537               		.loc 1 459 0
+ 538 026c F4FE      		sbrs r15,4
+ 539 026e 00C0      		rjmp .L38
+ 460:main.c        ****                                         ((vfunc_iiip_t) func)(argv[0], argv[1], argv[2], NULL);
+ 540               		.loc 1 460 0
+ 541 0270 20E0      		ldi r18,0
+ 542 0272 30E0      		ldi r19,0
+ 543 0274 4B81      		ldd r20,Y+3
+ 544 0276 6A81      		ldd r22,Y+2
+ 545 0278 8981      		ldd r24,Y+1
+ 546 027a F601      		movw r30,r12
+ 547 027c 0995      		icall
+ 548               	.LVL65:
+ 549 027e 00C0      		rjmp .L15
+ 550               	.LVL66:
+ 551               	.L38:
+ 462:main.c        ****                                         ((vfunc_iii_t) func)(argv[0], argv[1], argv[2]);
+ 552               		.loc 1 462 0
+ 553 0280 4B81      		ldd r20,Y+3
+ 554 0282 6A81      		ldd r22,Y+2
+ 555 0284 8981      		ldd r24,Y+1
+ 556 0286 F601      		movw r30,r12
+ 557 0288 0995      		icall
+ 558               	.LVL67:
+ 559 028a 00C0      		rjmp .L15
+ 560               	.LVL68:
+ 561               	.L33:
+ 469:main.c        ****                             if (argc <= 5)
+ 562               		.loc 1 469 0
+ 563 028c 9630      		cpi r25,lo8(6)
+ 564 028e 04F4      		brge .L39
+ 472:main.c        ****                                 if (argc == 5)
+ 565               		.loc 1 472 0
+ 566 0290 9530      		cpi r25,lo8(5)
+ 567 0292 01F4      		brne .L40
+ 473:main.c        ****                                     ((vfunc_iiiii_t) func)(argv[0], argv[1], argv[2], argv[3], argv
+ 568               		.loc 1 473 0
+ 569 0294 0D81      		ldd r16,Y+5
+ 570               	.LVL69:
+ 571 0296 2C81      		ldd r18,Y+4
+ 572 0298 4B81      		ldd r20,Y+3
+ 573 029a 6A81      		ldd r22,Y+2
+ 574 029c 8981      		ldd r24,Y+1
+ 575 029e F601      		movw r30,r12
+ 576 02a0 0995      		icall
+ 577               	.LVL70:
+ 578 02a2 00C0      		rjmp .L15
+ 579               	.LVL71:
+ 580               	.L40:
+ 475:main.c        ****                                     ((vfunc_iiii_t) func)(argv[0], argv[1], argv[2], argv[3]);
+ 581               		.loc 1 475 0
+ 582 02a4 2C81      		ldd r18,Y+4
+ 583 02a6 4B81      		ldd r20,Y+3
+ 584 02a8 6A81      		ldd r22,Y+2
+ 585 02aa 8981      		ldd r24,Y+1
+ 586 02ac F601      		movw r30,r12
+ 587 02ae 0995      		icall
+ 588               	.LVL72:
+ 589 02b0 00C0      		rjmp .L15
+ 590               	.LVL73:
+ 591               	.L39:
+ 480:main.c        ****                                 ((vfunc_iiiiii_t) func)(argv[0], argv[1], argv[2], argv[3], argv[4]
+ 592               		.loc 1 480 0
+ 593 02b2 EE80      		ldd r14,Y+6
+ 594 02b4 0D81      		ldd r16,Y+5
+ 595               	.LVL74:
+ 596 02b6 2C81      		ldd r18,Y+4
+ 597 02b8 4B81      		ldd r20,Y+3
+ 598 02ba 6A81      		ldd r22,Y+2
+ 599 02bc 8981      		ldd r24,Y+1
+ 600 02be F601      		movw r30,r12
+ 601 02c0 0995      		icall
+ 602               	.LVL75:
+ 603 02c2 00C0      		rjmp .L15
+ 604               	.LVL76:
+ 605               	.L41:
+ 606               	.LBE6:
+ 490:main.c        ****                         hi = mid - 1;   // Discard bottom half
+ 607               		.loc 1 490 0
+ 608 02c4 4FEF      		ldi r20,lo8(-1)
+ 609               	.LVL77:
+ 610 02c6 480F      		add r20,r24
+ 611               	.LVL78:
+ 612 02c8 00C0      		rjmp .L42
+ 613               	.LBE10:
+ 614               	.LBE11:
+ 615               		.cfi_endproc
+ 616               	.LFE12:
+ 618               		.text
+ 619               	.global	__vector_6
+ 621               	__vector_6:
+ 622               	.LFB13:
+ 510:main.c        ****                 goto graphics_command;
+ 511:main.c        ****             }
+ 512:main.c        **** 
+ 513:main.c        ****             /////////////////////////////////////////////////////////////
+ 514:main.c        ****             // Ignore anything else and simply loop
+ 515:main.c        ****         }
+ 516:main.c        ****     }
+ 517:main.c        **** }
+ 518:main.c        **** 
+ 519:main.c        **** /* Watchdog timer interrupt */
+ 520:main.c        **** ISR (WDT_vect)
+ 521:main.c        **** {
+ 623               		.loc 1 521 0
+ 624               		.cfi_startproc
+ 625 000e 1F92      		push r1
+ 626               	.LCFI4:
+ 627               		.cfi_def_cfa_offset 3
+ 628               		.cfi_offset 1, -2
+ 629 0010 0F92      		push r0
+ 630               	.LCFI5:
+ 631               		.cfi_def_cfa_offset 4
+ 632               		.cfi_offset 0, -3
+ 633 0012 0FB6      		in r0,__SREG__
+ 634 0014 0F92      		push r0
+ 635 0016 1124      		clr __zero_reg__
+ 636               	/* prologue: Signal */
+ 637               	/* frame size = 0 */
+ 638               	/* stack size = 3 */
+ 639               	.L__stack_usage = 3
+ 640               	/* epilogue start */
+ 522:main.c        ****     ; /* Do nothing - we do not have anything to do, just let the system reset. */
+ 523:main.c        **** }
+ 641               		.loc 1 523 0
+ 642 0018 0F90      		pop r0
+ 643 001a 0FBE      		out __SREG__,r0
+ 644 001c 0F90      		pop r0
+ 645 001e 1F90      		pop r1
+ 646 0020 1895      		reti
+ 647               		.cfi_endproc
+ 648               	.LFE13:
+ 650               	.global	bit_shift_rev_single_maskP
+ 651               		.section	.progmem.data,"a",@progbits
+ 654               	bit_shift_rev_single_maskP:
+ 655 0000 80        		.byte	-128
+ 656 0001 40        		.byte	64
+ 657 0002 20        		.byte	32
+ 658 0003 10        		.byte	16
+ 659 0004 08        		.byte	8
+ 660 0005 04        		.byte	4
+ 661 0006 02        		.byte	2
+ 662 0007 01        		.byte	1
+ 663               	.global	bit_shift_single_maskP
+ 666               	bit_shift_single_maskP:
+ 667 0008 01        		.byte	1
+ 668 0009 02        		.byte	2
+ 669 000a 04        		.byte	4
+ 670 000b 08        		.byte	8
+ 671 000c 10        		.byte	16
+ 672 000d 20        		.byte	32
+ 673 000e 40        		.byte	64
+ 674 000f 80        		.byte	-128
+ 675               	.global	bit_shift_maskP
+ 678               	bit_shift_maskP:
+ 679 0010 FF        		.byte	-1
+ 680 0011 7F        		.byte	127
+ 681 0012 3F        		.byte	63
+ 682 0013 1F        		.byte	31
+ 683 0014 0F        		.byte	15
+ 684 0015 07        		.byte	7
+ 685 0016 03        		.byte	3
+ 686 0017 01        		.byte	1
+ 687               		.comm	y_dim,1,1
+ 688               		.comm	x_dim,1,1
+ 689               		.comm	prefs,13,1
+ 692               	cmdtable_funcsP:
+ 693 0018 16        		.byte	22
+ 694 0019 00        		.byte	0
+ 695 001a 04        		.byte	4
+ 696 001b 01        		.byte	1
+ 697 001c 0B        		.byte	11
+ 698 001d 0E        		.byte	14
+ 699 001e 18        		.byte	24
+ 700 001f 12        		.byte	18
+ 701 0020 0A        		.byte	10
+ 702 0021 10        		.byte	16
+ 703 0022 05        		.byte	5
+ 704 0023 07        		.byte	7
+ 705 0024 03        		.byte	3
+ 706 0025 08        		.byte	8
+ 707 0026 06        		.byte	6
+ 708 0027 17        		.byte	23
+ 709 0028 1C        		.byte	28
+ 710 0029 1B        		.byte	27
+ 711 002a 1D        		.byte	29
+ 712 002b 02        		.byte	2
+ 713 002c 19        		.byte	25
+ 714 002d 11        		.byte	17
+ 715 002e 11        		.byte	17
+ 716 002f 09        		.byte	9
+ 717 0030 1A        		.byte	26
+ 718 0031 14        		.byte	20
+ 719 0032 0C        		.byte	12
+ 720 0033 15        		.byte	21
+ 721 0034 13        		.byte	19
+ 722 0035 13        		.byte	19
+ 723 0036 00        		.byte	0
+ 724 0037 04        		.byte	4
+ 725 0038 0D        		.byte	13
+ 726 0039 12        		.byte	18
+ 727 003a 0A        		.byte	10
+ 728 003b 05        		.byte	5
+ 729 003c 03        		.byte	3
+ 730 003d 08        		.byte	8
+ 731 003e 06        		.byte	6
+ 732 003f 17        		.byte	23
+ 733 0040 11        		.byte	17
+ 734 0041 0F        		.byte	15
+ 735 0042 09        		.byte	9
+ 738               	cmdtable_argsP:
+ 739 0043 00        		.byte	0
+ 740 0044 81        		.byte	-127
+ 741 0045 04        		.byte	4
+ 742 0046 80        		.byte	-128
+ 743 0047 04        		.byte	4
+ 744 0048 05        		.byte	5
+ 745 0049 01        		.byte	1
+ 746 004a 81        		.byte	-127
+ 747 004b 06        		.byte	6
+ 748 004c 01        		.byte	1
+ 749 004d 05        		.byte	5
+ 750 004e 01        		.byte	1
+ 751 004f 05        		.byte	5
+ 752 0050 03        		.byte	3
+ 753 0051 13        		.byte	19
+ 754 0052 A0        		.byte	-96
+ 755 0053 00        		.byte	0
+ 756 0054 04        		.byte	4
+ 757 0055 03        		.byte	3
+ 758 0056 13        		.byte	19
+ 759 0057 01        		.byte	1
+ 760 0058 A1        		.byte	-95
+ 761 0059 A1        		.byte	-95
+ 762 005a 13        		.byte	19
+ 763 005b 03        		.byte	3
+ 764 005c 01        		.byte	1
+ 765 005d 00        		.byte	0
+ 766 005e 00        		.byte	0
+ 767 005f 80        		.byte	-128
+ 768 0060 80        		.byte	-128
+ 769 0061 81        		.byte	-127
+ 770 0062 43        		.byte	67
+ 771 0063 44        		.byte	68
+ 772 0064 81        		.byte	-127
+ 773 0065 45        		.byte	69
+ 774 0066 44        		.byte	68
+ 775 0067 44        		.byte	68
+ 776 0068 42        		.byte	66
+ 777 0069 1B        		.byte	27
+ 778 006a 81        		.byte	-127
+ 779 006b 82        		.byte	-126
+ 780 006c 03        		.byte	3
+ 781 006d 1B        		.byte	27
+ 784               	cmdtable_cmdsP:
+ 785 006e 00        		.byte	0
+ 786 006f 02        		.byte	2
+ 787 0070 03        		.byte	3
+ 788 0071 04        		.byte	4
+ 789 0072 05        		.byte	5
+ 790 0073 06        		.byte	6
+ 791 0074 07        		.byte	7
+ 792 0075 08        		.byte	8
+ 793 0076 09        		.byte	9
+ 794 0077 0A        		.byte	10
+ 795 0078 0C        		.byte	12
+ 796 0079 0D        		.byte	13
+ 797 007a 0F        		.byte	15
+ 798 007b 10        		.byte	16
+ 799 007c 11        		.byte	17
+ 800 007d 12        		.byte	18
+ 801 007e 13        		.byte	19
+ 802 007f 14        		.byte	20
+ 803 0080 15        		.byte	21
+ 804 0081 16        		.byte	22
+ 805 0082 17        		.byte	23
+ 806 0083 18        		.byte	24
+ 807 0084 19        		.byte	25
+ 808 0085 1A        		.byte	26
+ 809 0086 1B        		.byte	27
+ 810 0087 1E        		.byte	30
+ 811 0088 1F        		.byte	31
+ 812 0089 20        		.byte	32
+ 813 008a 40        		.byte	64
+ 814 008b 41        		.byte	65
+ 815 008c 42        		.byte	66
+ 816 008d 43        		.byte	67
+ 817 008e 46        		.byte	70
+ 818 008f 48        		.byte	72
+ 819 0090 49        		.byte	73
+ 820 0091 4C        		.byte	76
+ 821 0092 4F        		.byte	79
+ 822 0093 50        		.byte	80
+ 823 0094 51        		.byte	81
+ 824 0095 52        		.byte	82
+ 825 0096 58        		.byte	88
+ 826 0097 59        		.byte	89
+ 827 0098 5A        		.byte	90
+ 830               	cmd_functabP:
+ 831 0099 0000      		.word	gs(backlight_level)
+ 832 009b 0000      		.word	gs(lcd_demo)
+ 833 009d 0000      		.word	gs(draw_vbitblt)
+ 834 009f 0000      		.word	gs(draw_box)
+ 835 00a1 0000      		.word	gs(draw_circle)
+ 836 00a3 0000      		.word	gs(draw_line)
+ 837 00a5 0000      		.word	gs(draw_lines)
+ 838 00a7 0000      		.word	gs(draw_mode)
+ 839 00a9 0000      		.word	gs(draw_pixel)
+ 840 00ab 0000      		.word	gs(draw_polygon)
+ 841 00ad 0000      		.word	gs(draw_rbox)
+ 842 00af 0000      		.word	gs(erase_box)
+ 843 00b1 0000      		.word	gs(lcd_factory_reset)
+ 844 00b3 0000      		.word	gs(fill_box)
+ 845 00b5 0000      		.word	gs(fill_vbox)
+ 846 00b7 0000      		.word	gs(font_layout)
+ 847 00b9 0000      		.word	gs(font_mode)
+ 848 00bb 0000      		.word	gs(font_position)
+ 849 00bd 0000      		.word	gs(font_set)
+ 850 00bf 0000      		.word	gs(graphics_mode)
+ 851 00c1 0000      		.word	gs(lcd_query)
+ 852 00c3 0000      		.word	gs(lcd_reset)
+ 853 00c5 0000      		.word	gs(lcd_screen_clear)
+ 854 00c7 0000      		.word	gs(lcd_screen_reverse)
+ 855 00c9 0000      		.word	gs(serial_baudrate)
+ 856 00cb 0000      		.word	gs(serial_putc)
+ 857 00cd 0000      		.word	gs(lcd_set)
+ 858 00cf 0000      		.word	gs(sprite_draw)
+ 859 00d1 0000      		.word	gs(sprite_splash)
+ 860 00d3 0000      		.word	gs(sprite_upload)
+ 861               		.comm	functabP,2,1
+ 864               	ks0108b_functabP:
+ 865 00d5 0000      		.word	gs(ks0108b_hline)
+ 866 00d7 0000      		.word	gs(ks0108b_init)
+ 867 00d9 0000      		.word	gs(ks0108b_screen_clear)
+ 868 00db 0000      		.word	gs(ks0108b_screen_reverse)
+ 869 00dd 0000      		.word	gs(ks0108b_set_pixel)
+ 870 00df 0000      		.word	gs(ks0108b_vbitblt)
+ 871 00e1 0000      		.word	gs(ks0108b_vline)
+ 872 00e3 0000      		.word	gs(ks0108b_vscroll)
+ 875               	t6963_functabP:
+ 876 00e5 0000      		.word	gs(t6963_hline)
+ 877 00e7 0000      		.word	gs(t6963_init)
+ 878 00e9 0000      		.word	gs(t6963_screen_clear)
+ 879 00eb 0000      		.word	gs(t6963_screen_reverse)
+ 880 00ed 0000      		.word	gs(t6963_set_pixel)
+ 881 00ef 0000      		.word	gs(t6963_vbitblt)
+ 882 00f1 0000      		.word	gs(t6963_vline)
+ 883 00f3 0000      		.word	gs(t6963_vscroll)
+ 884               	.global	consts
+ 887               	consts:
+ 888 00f5 01        		.byte	1
+ 889 00f6 26        		.byte	38
+ 890 00f7 22        		.byte	34
+ 891 00f8 0E        		.byte	14
+ 892 00f9 22        		.byte	34
+ 893 00fa 06        		.byte	6
+ 894               		.comm	line_buffer,16,1
+ 895               		.text
+ 896               	.Letext0:
+ 897               		.file 2 "/usr/local/CrossPack-AVR-20131216/avr/include/stdint.h"
+ 898               		.file 3 "glcd.h"
+ 899               		.file 4 "/usr/local/CrossPack-AVR-20131216/avr/include/avr/eeprom.h"
+DEFINED SYMBOLS
+                            *ABS*:00000000 main.c
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:2      *ABS*:0000003e __SP_H__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:3      *ABS*:0000003d __SP_L__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:4      *ABS*:0000003f __SREG__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:5      *ABS*:00000000 __tmp_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:6      *ABS*:00000001 __zero_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:12     .text:00000000 graphics_mode
+                            *COM*:0000000d prefs
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:36     .text.startup:00000000 main
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:875    .progmem.data:000000e5 t6963_functabP
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:864    .progmem.data:000000d5 ks0108b_functabP
+                            *COM*:00000002 functabP
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:784    .progmem.data:0000006e cmdtable_cmdsP
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:692    .progmem.data:00000018 cmdtable_funcsP
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:830    .progmem.data:00000099 cmd_functabP
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:738    .progmem.data:00000043 cmdtable_argsP
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:621    .text:0000000e __vector_6
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:654    .progmem.data:00000000 bit_shift_rev_single_maskP
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:666    .progmem.data:00000008 bit_shift_single_maskP
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:678    .progmem.data:00000010 bit_shift_maskP
+                            *COM*:00000001 y_dim
+                            *COM*:00000001 x_dim
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccnGezRM.s:887    .progmem.data:000000f5 consts
+                            *COM*:00000010 line_buffer
+
+UNDEFINED SYMBOLS
+__eerd_byte_m168
+lcd_factory_reset
+backlight_init
+backlight_level
+font_set
+font_mode
+drawing_mode
+serial_baudrate
+serial_flush
+lcd_demo
+lcd_screen_clear
+serial_getc
+font_lf
+font_cr
+font_backspace
+font_draw
+draw_vbitblt
+draw_box
+draw_circle
+draw_line
+draw_lines
+draw_mode
+draw_pixel
+draw_polygon
+draw_rbox
+erase_box
+fill_box
+fill_vbox
+font_layout
+font_position
+lcd_query
+lcd_reset
+lcd_screen_reverse
+serial_putc
+lcd_set
+sprite_draw
+sprite_splash
+sprite_upload
+ks0108b_hline
+ks0108b_init
+ks0108b_screen_clear
+ks0108b_screen_reverse
+ks0108b_set_pixel
+ks0108b_vbitblt
+ks0108b_vline
+ks0108b_vscroll
+t6963_hline
+t6963_init
+t6963_screen_clear
+t6963_screen_reverse
+t6963_set_pixel
+t6963_vbitblt
+t6963_vline
+t6963_vscroll
+__do_clear_bss

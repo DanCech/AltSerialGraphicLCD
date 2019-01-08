@@ -1,0 +1,200 @@
+/* -*- C++ -*- ****************************************************************
+ *
+ *  System        : GLCD
+ *  Module        : Function table definition
+ *  Object Name   : $RCSfile: func.def,v $
+ *  Revision      : $Revision: 1.21 $
+ *  Date          : $Date: 2015/07/05 21:05:43 $
+ *  Author        : $Author: jon $
+ *  Created By    : Jon Green
+ *  Created       : Mon Apr 13 22:32:29 2015
+ *  Last Modified : <150705.1834>
+ *
+ *  Description
+ *
+ *  Notes
+ *
+ *  History
+ *
+ ****************************************************************************
+ *
+ * Copyright (c) 2015 Jon Green.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ *
+ ****************************************************************************/
+
+#ifdef DEFFUNC
+/// Define the funtions. Note we sacrafice program memory for RAM and define 2
+/// tables. We could have used a table in RAM however the cost of re-writing
+/// the different chip functions is high on program space so instead we simply
+/// select the table that we want to use and accept that there is some level
+/// of duplication of data. de-duplicating costs more instructions over a
+/// strightforward table.
+///
+/// DEFUNC - Define a function table lookup function.
+///
+/// DEFFUNC (func_name, t6963_function, ks0108b_function)
+///
+/// ENDFUNC (func_name, t6963_function, ks0108b_function)
+///
+/// DEFFUNC is used for all entries except the last which is labelled as
+/// ENDFUNC.
+///
+/// Where the list is sorted in ascending cmd_char values
+///
+/// @param [in] func_name The enumerate name of the function
+/// @param [in] t6963_function  The T6963 function to invoke.
+/// @param [in] ks0108b_function  The KS0108b function to invoke.
+///
+DEFFUNC(F_DRV_HLINE,          t6963_hline,          ks0108b_hline)
+DEFFUNC(F_DRV_INIT,           t6963_init,           ks0108b_init)
+DEFFUNC(F_DRV_SCREEN_CLEAR,   t6963_screen_clear,   ks0108b_screen_clear)
+DEFFUNC(F_DRV_SCREEN_REVERSE, t6963_screen_reverse, ks0108b_screen_reverse)
+DEFFUNC(F_DRV_SET_PIXEL,      t6963_set_pixel,      ks0108b_set_pixel)
+DEFFUNC(F_DRV_VBITBLT,        t6963_vbitblt,        ks0108b_vbitblt)
+DEFFUNC(F_DRV_VLINE,          t6963_vline,          ks0108b_vline)
+ENDFUNC(F_DRV_VSCROLL,        t6963_vscroll,        ks0108b_vscroll)
+#endif
+
+#ifdef DEFCMDFUNC
+/// Define the command funtions. Note we sacrafice program memory for RAM and
+/// define 2 tables. We could have used a table in RAM however the cost of
+/// re-writing the different chip functions is high on program space so
+/// instead we simply select the table that we want to use and accept that
+/// there is some level of duplication of data. de-duplicating costs more
+/// instructions over a strightforward table.
+/// 
+/// DEFCMDUNC - Define a function table lookup function.
+/// 
+/// DEFCMDFUNC (func_name, function)
+/// 
+/// ENDCMDFUNC (func_name, function)
+/// 
+/// DEFCMDFUNC is used for all entries except the last which is labelled as
+/// ENDCMDFUNC.
+/// 
+/// Where the list is sorted in ascending cmd_char values
+/// 
+/// @param [in] func_name The enumerate name of the function
+/// @param [in] function  The function to invoke.
+///
+DEFCMDFUNC(CMDF_BACKLIGHT_LEVEL, backlight_level)
+DEFCMDFUNC(CMDF_DEMO,            lcd_demo)
+DEFCMDFUNC(CMDF_DRAW_BITBLT,     draw_vbitblt)
+DEFCMDFUNC(CMDF_DRAW_BOX,        draw_box)
+DEFCMDFUNC(CMDF_DRAW_CIRCLE,     draw_circle)
+DEFCMDFUNC(CMDF_DRAW_LINE,       draw_line)
+DEFCMDFUNC(CMDF_DRAW_LINES,      draw_lines)
+DEFCMDFUNC(CMDF_DRAW_MODE,       draw_mode)
+DEFCMDFUNC(CMDF_DRAW_PIXEL,      draw_pixel)
+DEFCMDFUNC(CMDF_DRAW_POLYGON,    draw_polygon)
+DEFCMDFUNC(CMDF_DRAW_RBOX,       draw_rbox)
+DEFCMDFUNC(CMDF_ERASE_BOX,       erase_box)
+DEFCMDFUNC(CMDF_FACTORY_RESET,   lcd_factory_reset)
+DEFCMDFUNC(CMDF_FILL_BOX,        fill_box)
+DEFCMDFUNC(CMDF_FILL_VBOX,       fill_vbox)
+DEFCMDFUNC(CMDF_FONT_LAYOUT,     font_layout)
+DEFCMDFUNC(CMDF_FONT_MODE,       font_mode)
+DEFCMDFUNC(CMDF_FONT_POSITION,   font_position)
+DEFCMDFUNC(CMDF_FONT_SET,        font_set)
+DEFCMDFUNC(CMDF_GRAPHICS_MODE,   graphics_mode)
+DEFCMDFUNC(CMDF_QUERY,           lcd_query)
+DEFCMDFUNC(CMDF_RESET,           lcd_reset)
+DEFCMDFUNC(CMDF_SCREEN_CLEAR,    lcd_screen_clear)
+DEFCMDFUNC(CMDF_SCREEN_REVERSE,  lcd_screen_reverse)
+DEFCMDFUNC(CMDF_SERIAL_BAUDRATE, serial_baudrate)
+DEFCMDFUNC(CMDF_SERIAL_PUTC,     serial_putc)
+DEFCMDFUNC(CMDF_SET,             lcd_set)
+DEFCMDFUNC(CMDF_SPRITE_DRAW,     sprite_draw)
+DEFCMDFUNC(CMDF_SPRITE_SPLASH,   sprite_splash)
+ENDCMDFUNC(CMDF_SPRITE_UPLOAD,   sprite_upload)
+#endif
+
+#ifdef DEFCMD
+// Define the argument types of the functions.
+#ifndef _FUNCDEFS
+#define _FUNCDEFS
+#define FUNC_FILL_CMD       0x80        /* Pass the command byte to the function */
+#define FUNC_DRAW_MODE      0x40        /* Pass the draw mode to the function */
+#define FUNC_DRAW_ZERO      0x20        /* Pass a zero to the function */
+#define FUNC_DRAW_NULL      0x10        /* Pass a NULL pata pointer argument */
+#define FUNC_PRE_DRAW_MODE  0x08        /* Pass the draw mode to the function as 1st arg */
+/* Note when PRE_DRAW is used then the argument count must be incremented by
+** 1 to take accont of the argument being pre-loaded. */
+#define FUNC_ARGC_MASK      0x07        /* Argument count mask */
+#endif
+
+/// DEFCMD - Define the binding between the commands and the ASCII control
+/// characters.
+///
+/// DEFCMD (cmd_char, enum_name, args, function)
+///
+/// Where the list is sorted in ascending cmd_char values
+///
+/// @param [in] cmd_char  The command character in ASCII
+/// @param [in] enum_name The name of the enumerated name
+/// @param [in] args      The number of arguments and argument attributes
+/// @param [in] function  The address of the function to invoke.
+/// @param [in] enum_func The label of the function to invoke.
+///
+DEFCMD(0x00, CMD_CLEAR_SCREEN,     0,                                   CMDF_SCREEN_CLEAR)      /* Ctrl-@ */
+DEFCMD(0x02, CMD_SET_BACKLIGHT,    1|FUNC_FILL_CMD,                     CMDF_BACKLIGHT_LEVEL)   /* Ctrl-B */
+DEFCMD(0x03, CMD_DRAW_CIRCLE,      4,                                   CMDF_DRAW_CIRCLE)       /* Ctrl-C */
+DEFCMD(0x04, CMD_DEMO,             0|FUNC_FILL_CMD,                     CMDF_DEMO)              /* Ctrl-D */
+DEFCMD(0x05, CMD_ERASE_BLOCK,      4,                                   CMDF_ERASE_BOX)         /* Ctrl-E */
+DEFCMD(0x06, CMD_FILL_VBLOCK,      5,                                   CMDF_FILL_VBOX)         /* Ctrl-F */
+DEFCMD(0x07, CMD_CHANGE_BAUD_RATE, 1,                                   CMDF_SERIAL_BAUDRATE)   /* Ctrl-G */
+DEFCMD(0x08, CMD_FONT_SET,         1|FUNC_FILL_CMD,                     CMDF_FONT_SET)          /* Ctrl-H */
+DEFCMD(0x09, CMD_DRAW_ROUNDED_BOX, 6,                                   CMDF_DRAW_RBOX)         /* Ctrl-I */
+DEFCMD(0x0a, CMD_FONT_MODE,        1,                                   CMDF_FONT_MODE)         /* Ctrl-J */
+DEFCMD(0x0c, CMD_DRAW_LINE,        5,                                   CMDF_DRAW_LINE)         /* Ctrl-L */
+DEFCMD(0x0d, CMD_DRAW_MODE,        1,                                   CMDF_DRAW_MODE)         /* Ctrl-M */
+DEFCMD(0x0f, CMD_DRAW_BOX,         5,                                   CMDF_DRAW_BOX)          /* Ctrl-O */
+DEFCMD(0x10, CMD_DRAW_PIXEL,       3,                                   CMDF_DRAW_PIXEL)        /* Ctrl-P */
+DEFCMD(0x11, CMD_DRAW_MULTILINE,   3|FUNC_DRAW_NULL,                    CMDF_DRAW_LINES)        /* Ctrl-Q */
+DEFCMD(0x12, CMD_REVERSE_MODE,     0|FUNC_DRAW_ZERO|FUNC_FILL_CMD,      CMDF_SCREEN_REVERSE)    /* Ctrl-R */
+DEFCMD(0x13, CMD_TOGGLE_SPLASH,    0,                                   CMDF_SPRITE_SPLASH)     /* Ctrl-S */
+DEFCMD(0x14, CMD_DRAW_SPRITE,      4,                                   CMDF_SPRITE_DRAW)       /* Ctrl-T */
+DEFCMD(0x15, CMD_UPLOAD_SPRITE,    3,                                   CMDF_SPRITE_UPLOAD)     /* Ctrl-U */
+DEFCMD(0x16, CMD_BITBLT,           3|FUNC_DRAW_NULL,                    CMDF_DRAW_BITBLT)       /* Ctrl-V */
+DEFCMD(0x17, CMD_ECHO,             1,                                   CMDF_SERIAL_PUTC)       /* Ctrl-W */
+DEFCMD(0x18, CMD_SET_X_OFFSET,     1|FUNC_DRAW_ZERO|FUNC_FILL_CMD,      CMDF_FONT_POSITION)     /* Ctrl-X */
+DEFCMD(0x19, CMD_SET_Y_OFFSET,     1|FUNC_DRAW_ZERO|FUNC_FILL_CMD,      CMDF_FONT_POSITION)     /* Ctrl-Y */
+DEFCMD(0x1a, CMD_DRAW_POLYGON,     3|FUNC_DRAW_NULL,                    CMDF_DRAW_POLYGON)      /* Ctrl-Z */
+DEFCMD(0x1b, CMD_SET,              3,                                   CMDF_SET)
+DEFCMD(0x1e, CMD_QUERY,            1,                                   CMDF_QUERY) 
+DEFCMD(0x1f, CMD_FACTORY_RESET,    0,                                   CMDF_FACTORY_RESET)
+DEFCMD(0x20, CMD_RESET,            0,                                   CMDF_RESET)
+DEFCMD(0x40, CMDX_GRAPHICS_ON,     0|FUNC_FILL_CMD,                     CMDF_GRAPHICS_MODE)
+DEFCMD(0x41, CMDX_GRAPHICS_OFF,    0|FUNC_FILL_CMD,                     CMDF_GRAPHICS_MODE)
+DEFCMD(0x42, CMDX_SET_BACKLIGHT,   1|FUNC_FILL_CMD,                     CMDF_BACKLIGHT_LEVEL)
+DEFCMD(0x43, CMDX_DRAW_CIRCLE,     3|FUNC_DRAW_MODE,                    CMDF_DRAW_CIRCLE)
+DEFCMD(0x46, CMD_FILL_BLOCK,       4|FUNC_DRAW_MODE,                    CMDF_FILL_BOX)
+DEFCMD(0x48, CMDX_FONT_SET,        1|FUNC_FILL_CMD,                     CMDF_FONT_SET)
+DEFCMD(0x49, CMDX_DRAW_ROUNDED_BOX,5|FUNC_DRAW_MODE,                    CMDF_DRAW_RBOX)
+DEFCMD(0x4c, CMDX_DRAW_LINE,       4|FUNC_DRAW_MODE,                    CMDF_DRAW_LINE)
+DEFCMD(0x4f, CMDX_DRAW_BOX,        4|FUNC_DRAW_MODE,                    CMDF_DRAW_BOX)
+DEFCMD(0x50, CMDX_DRAW_PIXEL,      2|FUNC_DRAW_MODE,                    CMDF_DRAW_PIXEL)
+DEFCMD(0x51, CMDX_DRAW_MULTILINE,  3|FUNC_PRE_DRAW_MODE|FUNC_DRAW_NULL, CMDF_DRAW_LINES)
+DEFCMD(0x52, CMDX_REVERSE_MODE,    1|FUNC_FILL_CMD,                     CMDF_SCREEN_REVERSE)
+DEFCMD(0x58, CMDX_SET_XY_OFFSET,   2|FUNC_FILL_CMD,                     CMDF_FONT_POSITION)
+DEFCMD(0x59, CMDX_SET_XY_STRING,   3,                                   CMDF_FONT_LAYOUT)
+ENDCMD(0x5a, CMDX_DRAW_POLYGON,    3|FUNC_PRE_DRAW_MODE|FUNC_DRAW_NULL, CMDF_DRAW_POLYGON)
+#endif

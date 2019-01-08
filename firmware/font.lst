@@ -1,0 +1,2659 @@
+   1               		.file	"font.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               	.global	font_init
+  12               	font_init:
+  13               	.LFB11:
+  14               		.file 1 "font.c"
+   1:font.c        **** /* -*- c++ -*- ***************************************************************
+   2:font.c        ****  *
+   3:font.c        ****  *  System      : Serial GLCD
+   4:font.c        ****  *  Module      : Font Handling
+   5:font.c        ****  *  Object Name : $RCSfile: font.c,v $
+   6:font.c        ****  *  Revision    : $Revision: 1.15 $
+   7:font.c        ****  *  Date        : $Date: 2015/07/05 21:09:09 $
+   8:font.c        ****  *  Author      : $Author: jon $
+   9:font.c        ****  *  Created By  : Jon Green
+  10:font.c        ****  *  Created     : Sun Apr 5 08:43:33 2015 Last Modified : <150705.1932>
+  11:font.c        ****  *
+  12:font.c        ****  *  Description : Handles all of the font related
+  13:font.c        ****  *
+  14:font.c        ****  *  Notes       : Derrived from the code by Jennifer Holt and adapted for the
+  15:font.c        ****  *               160x128 screen.
+  16:font.c        ****  *
+  17:font.c        ****  *  History     :
+  18:font.c        ****  *
+  19:font.c        ****  *****************************************************************************
+  20:font.c        ****  *
+  21:font.c        ****  *  Copyright (c) 2010 Jennifer Holt
+  22:font.c        ****  *  Copyright (c) 2015 Jon Green
+  23:font.c        ****  *
+  24:font.c        ****  *  Permission is hereby granted, free of charge, to any person obtaining a
+  25:font.c        ****  *  copy of this software and associated documentation files (the "Software"),
+  26:font.c        ****  *  to deal in the Software without restriction, including without limitation
+  27:font.c        ****  *  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+  28:font.c        ****  *  and/or sell copies of the Software, and to permit persons to whom the
+  29:font.c        ****  *  Software is furnished to do so, subject to the following conditions:
+  30:font.c        ****  *
+  31:font.c        ****  *  The above copyright notice and this permission notice shall be included in
+  32:font.c        ****  *  all copies or substantial portions of the Software.
+  33:font.c        ****  *
+  34:font.c        ****  *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  35:font.c        ****  *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  36:font.c        ****  *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+  37:font.c        ****  *  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  38:font.c        ****  *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+  39:font.c        ****  *  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+  40:font.c        ****  *  DEALINGS IN THE SOFTWARE.
+  41:font.c        ****  *
+  42:font.c        ****  ****************************************************************************/
+  43:font.c        **** 
+  44:font.c        **** #include <avr/pgmspace.h>
+  45:font.c        **** #include <avr/interrupt.h>
+  46:font.c        **** #include <avr/boot.h>
+  47:font.c        **** #include <avr/io.h>
+  48:font.c        **** #include "glcd.h"
+  49:font.c        **** 
+  50:font.c        **** // This include file stores all the revelant font data. You can make new ones
+  51:font.c        **** // with the bmp2header_font utility in the utilities folder
+  52:font.c        **** /* #include "font.h"                    -- The original 8x5 font. The 4's and 7's not so good. */
+  53:font.c        **** #include "font_alt_5x8.h"               /* A updated 5x8 font which is slightly cleaner */
+  54:font.c        **** #include "font_tom_thumb_3x6.h"         /* A small 3x6 font */
+  55:font.c        **** // Noted that there is insufficient space to include the 16x10 font
+  56:font.c        **** 
+  57:font.c        **** // The number of bytes in the font file header.
+  58:font.c        **** #define FONT_FILE_HEADER_LEN      5
+  59:font.c        **** 
+  60:font.c        **** // The font drawing mode
+  61:font.c        **** static uint8_t font_draw_mode;
+  62:font.c        **** 
+  63:font.c        **** // Upper left corner of character, x-coord
+  64:font.c        **** static uint8_t x_pos;
+  65:font.c        **** // Upper left corner of character, y-coord
+  66:font.c        **** static uint8_t y_pos;
+  67:font.c        **** 
+  68:font.c        **** // How font interacts with background. (bitblt option)
+  69:font.c        **** // 7 = overwrite and is default (no need to erase the background first)
+  70:font.c        **** //static uint8_t font_mode;
+  71:font.c        **** // Number of bytes in a character (5 for default font)
+  72:font.c        **** static uint8_t font_bytes;
+  73:font.c        **** // Width of a character in pixels (5 for default font)
+  74:font.c        **** static uint8_t font_w;
+  75:font.c        **** // Width of a character + space of font in pixels (6 for default font)
+  76:font.c        **** static uint8_t font_ws;
+  77:font.c        **** // Height of a character in pixels (8 for default font)
+  78:font.c        **** static uint8_t font_h;
+  79:font.c        **** // Horizontal space to leave between characters
+  80:font.c        **** static uint8_t font_space;
+  81:font.c        **** // First valid character
+  82:font.c        **** static uint8_t font_first_char;
+  83:font.c        **** // Last valid character
+  84:font.c        **** static uint8_t font_last_char;
+  85:font.c        **** // The current font we are using
+  86:font.c        **** static const char *font_ptr;
+  87:font.c        **** // The last position we are using.
+  88:font.c        **** static uint8_t font_xpos;
+  89:font.c        **** // The last position we are using.
+  90:font.c        **** static uint8_t font_ypos;
+  91:font.c        **** // The start position we are using.
+  92:font.c        **** static uint8_t font_start_xpos;
+  93:font.c        **** 
+  94:font.c        **** //////////////////////////////////////////////////////////////////////////////
+  95:font.c        **** /// Initialise the fonts.
+  96:font.c        **** /// We install the fonts that we are using.
+  97:font.c        **** ///
+  98:font.c        **** /// @param [in] fptr Pointer to the font file in flash memory.
+  99:font.c        **** void
+ 100:font.c        **** font_init (const char *fptr)
+ 101:font.c        **** {
+  15               		.loc 1 101 0
+  16               		.cfi_startproc
+  17               	.LVL0:
+  18               	/* prologue: function */
+  19               	/* frame size = 0 */
+  20               	/* stack size = 0 */
+  21               	.L__stack_usage = 0
+ 102:font.c        ****     uint8_t temp_w;
+ 103:font.c        ****     
+ 104:font.c        ****     // Use the default font if none specified
+ 105:font.c        ****     if (fptr == NULL)
+  22               		.loc 1 105 0
+  23 0000 0097      		sbiw r24,0
+  24 0002 01F4      		brne .L2
+ 106:font.c        ****         fptr = font_alt_5x8;
+  25               		.loc 1 106 0
+  26 0004 80E0      		ldi r24,lo8(font_alt_5x8)
+  27 0006 90E0      		ldi r25,hi8(font_alt_5x8)
+  28               	.LVL1:
+  29               	.L2:
+ 107:font.c        **** 
+ 108:font.c        ****     // Set up the default font
+ 109:font.c        ****     font_ptr = fptr;
+  30               		.loc 1 109 0
+  31 0008 9093 0000 		sts font_ptr+1,r25
+  32 000c 8093 0000 		sts font_ptr,r24
+  33               	.LVL2:
+  34               	.LBB2:
+ 110:font.c        ****     temp_w = pgm_read_byte(fptr++);
+  35               		.loc 1 110 0
+  36 0010 FC01      		movw r30,r24
+  37               	/* #APP */
+  38               	 ;  110 "font.c" 1
+  39 0012 2491      		lpm r18, Z
+  40               		
+  41               	 ;  0 "" 2
+  42               	.LVL3:
+  43               	/* #NOAPP */
+  44               	.LBE2:
+ 111:font.c        ****     font_w = temp_w;
+  45               		.loc 1 111 0
+  46 0014 2093 0000 		sts font_w,r18
+  47               	.LVL4:
+  48               	.LBB3:
+ 112:font.c        ****     font_h = pgm_read_byte(fptr++);
+  49               		.loc 1 112 0
+  50 0018 3196      		adiw r30,1
+  51               	.LVL5:
+  52               	/* #APP */
+  53               	 ;  112 "font.c" 1
+  54 001a 3491      		lpm r19, Z
+  55               		
+  56               	 ;  0 "" 2
+  57               	.LVL6:
+  58               	/* #NOAPP */
+  59               	.LBE3:
+  60 001c 3093 0000 		sts font_h,r19
+  61               	.LVL7:
+  62               	.LBB4:
+ 113:font.c        ****     font_bytes = (font_h + 7) / 8;      // 8 pixels/byte with partial rows
+ 114:font.c        ****     font_space = pgm_read_byte(fptr++);
+  63               		.loc 1 114 0
+  64 0020 3196      		adiw r30,1
+  65               	.LVL8:
+  66               	/* #APP */
+  67               	 ;  114 "font.c" 1
+  68 0022 E491      		lpm r30, Z
+  69               		
+  70               	 ;  0 "" 2
+  71               	.LVL9:
+  72               	/* #NOAPP */
+  73               	.LBE4:
+  74 0024 E093 0000 		sts font_space,r30
+ 115:font.c        ****     font_ws = temp_w + font_space;
+  75               		.loc 1 115 0
+  76 0028 E20F      		add r30,r18
+  77               	.LVL10:
+  78 002a E093 0000 		sts font_ws,r30
+  79               	.LVL11:
+  80               	.LBB5:
+ 116:font.c        ****     font_first_char = pgm_read_byte(fptr++);
+  81               		.loc 1 116 0
+  82 002e FC01      		movw r30,r24
+  83 0030 3396      		adiw r30,3
+  84               	.LVL12:
+  85               	/* #APP */
+  86               	 ;  116 "font.c" 1
+  87 0032 E491      		lpm r30, Z
+  88               		
+  89               	 ;  0 "" 2
+  90               	.LVL13:
+  91               	/* #NOAPP */
+  92               	.LBE5:
+  93 0034 E093 0000 		sts font_first_char,r30
+  94               	.LVL14:
+  95               	.LBB6:
+ 117:font.c        ****     font_last_char = pgm_read_byte(fptr++);
+  96               		.loc 1 117 0
+  97 0038 FC01      		movw r30,r24
+  98               	.LVL15:
+  99 003a 3496      		adiw r30,4
+ 100               	.LVL16:
+ 101               	/* #APP */
+ 102               	 ;  117 "font.c" 1
+ 103 003c 8491      		lpm r24, Z
+ 104               		
+ 105               	 ;  0 "" 2
+ 106               	.LVL17:
+ 107               	/* #NOAPP */
+ 108               	.LBE6:
+ 109 003e 8093 0000 		sts font_last_char,r24
+ 113:font.c        ****     font_bytes = (font_h + 7) / 8;      // 8 pixels/byte with partial rows
+ 110               		.loc 1 113 0
+ 111 0042 E32F      		mov r30,r19
+ 112               	.LVL18:
+ 113 0044 F0E0      		ldi r31,0
+ 114 0046 3796      		adiw r30,7
+ 115 0048 83E0      		ldi r24,3
+ 116               		1:
+ 117 004a F595      		asr r31
+ 118 004c E795      		ror r30
+ 119 004e 8A95      		dec r24
+ 120 0050 01F4      		brne 1b
+ 121               	.LVL19:
+ 118:font.c        ****     font_bytes *= temp_w;               // Need font_w stacks of rows
+ 122               		.loc 1 118 0
+ 123 0052 2E9F      		mul r18,r30
+ 124 0054 E02D      		mov r30,r0
+ 125 0056 1124      		clr r1
+ 126 0058 E093 0000 		sts font_bytes,r30
+ 119:font.c        **** 
+ 120:font.c        ****     // Reset the position
+ 121:font.c        ****     font_xpos = ~0;
+ 127               		.loc 1 121 0
+ 128 005c 8FEF      		ldi r24,lo8(-1)
+ 129 005e 8093 0000 		sts font_xpos,r24
+ 122:font.c        ****     font_ypos = ~0;
+ 130               		.loc 1 122 0
+ 131 0062 8093 0000 		sts font_ypos,r24
+ 132 0066 0895      		ret
+ 133               		.cfi_endproc
+ 134               	.LFE11:
+ 136               	.global	font_set
+ 138               	font_set:
+ 139               	.LFB12:
+ 123:font.c        **** }
+ 124:font.c        **** 
+ 125:font.c        **** //////////////////////////////////////////////////////////////////////////////
+ 126:font.c        **** /// Changes the current font
+ 127:font.c        **** ///
+ 128:font.c        **** /// @param [in] font The charaterset to use.
+ 129:font.c        **** ///                  0 = Default font 5x8
+ 130:font.c        **** ///                  1 = Small font 3x6
+ 131:font.c        **** /// @param [in] cmd  The command. 0x08=store, 0x48
+ 132:font.c        **** void
+ 133:font.c        **** font_set (uint8_t font, uint8_t cmd)
+ 134:font.c        **** {
+ 140               		.loc 1 134 0
+ 141               		.cfi_startproc
+ 142               	.LVL20:
+ 143 0068 CF93      		push r28
+ 144               	.LCFI0:
+ 145               		.cfi_def_cfa_offset 3
+ 146               		.cfi_offset 28, -2
+ 147 006a DF93      		push r29
+ 148               	.LCFI1:
+ 149               		.cfi_def_cfa_offset 4
+ 150               		.cfi_offset 29, -3
+ 151 006c 00D0      		rcall .
+ 152               	.LCFI2:
+ 153               		.cfi_def_cfa_offset 6
+ 154 006e CDB7      		in r28,__SP_L__
+ 155 0070 DEB7      		in r29,__SP_H__
+ 156               	.LCFI3:
+ 157               		.cfi_def_cfa_register 28
+ 158               	/* prologue: function */
+ 159               	/* frame size = 2 */
+ 160               	/* stack size = 4 */
+ 161               	.L__stack_usage = 4
+ 162               	.LVL21:
+ 135:font.c        ****     const char *fptr;
+ 136:font.c        ****     
+ 137:font.c        ****     // Determine the font
+ 138:font.c        ****     font &= 1;
+ 139:font.c        ****     if (font == 0)
+ 163               		.loc 1 139 0
+ 164 0072 482F      		mov r20,r24
+ 165 0074 4170      		andi r20,lo8(1)
+ 166               	.LVL22:
+ 167 0076 80FD      		sbrc r24,0
+ 168 0078 00C0      		rjmp .L8
+ 140:font.c        ****         fptr = font_alt_5x8;
+ 169               		.loc 1 140 0
+ 170 007a 80E0      		ldi r24,lo8(font_alt_5x8)
+ 171 007c 90E0      		ldi r25,hi8(font_alt_5x8)
+ 172 007e 00C0      		rjmp .L6
+ 173               	.L8:
+ 141:font.c        ****     else
+ 142:font.c        ****         fptr = tom_thumb_3x6;
+ 174               		.loc 1 142 0
+ 175 0080 80E0      		ldi r24,lo8(tom_thumb_3x6)
+ 176 0082 90E0      		ldi r25,hi8(tom_thumb_3x6)
+ 177               	.L6:
+ 178               	.LVL23:
+ 143:font.c        ****     
+ 144:font.c        ****     // Initialise the font.
+ 145:font.c        ****     font_init(fptr);
+ 179               		.loc 1 145 0
+ 180 0084 4983      		std Y+1,r20
+ 181 0086 6A83      		std Y+2,r22
+ 182 0088 0E94 0000 		call font_init
+ 183               	.LVL24:
+ 146:font.c        ****     
+ 147:font.c        ****     // Save the setting if required.
+ 148:font.c        ****     if (cmd == CMD_FONT_SET)
+ 184               		.loc 1 148 0
+ 185 008c 6A81      		ldd r22,Y+2
+ 186 008e 4981      		ldd r20,Y+1
+ 187 0090 6830      		cpi r22,lo8(8)
+ 188 0092 01F4      		brne .L5
+ 149:font.c        ****         lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_FONT, font);
+ 189               		.loc 1 149 0
+ 190 0094 6BE0      		ldi r22,lo8(11)
+ 191 0096 85EC      		ldi r24,lo8(-59)
+ 192               	/* epilogue start */
+ 150:font.c        **** }
+ 193               		.loc 1 150 0
+ 194 0098 0F90      		pop __tmp_reg__
+ 195 009a 0F90      		pop __tmp_reg__
+ 196 009c DF91      		pop r29
+ 197 009e CF91      		pop r28
+ 149:font.c        ****         lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_FONT, font);
+ 198               		.loc 1 149 0
+ 199 00a0 0C94 0000 		jmp lcd_set
+ 200               	.LVL25:
+ 201               	.L5:
+ 202               	/* epilogue start */
+ 203               		.loc 1 150 0
+ 204 00a4 0F90      		pop __tmp_reg__
+ 205 00a6 0F90      		pop __tmp_reg__
+ 206 00a8 DF91      		pop r29
+ 207 00aa CF91      		pop r28
+ 208 00ac 0895      		ret
+ 209               		.cfi_endproc
+ 210               	.LFE12:
+ 212               	.global	font_mode
+ 214               	font_mode:
+ 215               	.LFB13:
+ 151:font.c        **** 
+ 152:font.c        **** //////////////////////////////////////////////////////////////////////////////
+ 153:font.c        **** /// Changes the drawing mode.
+ 154:font.c        **** ///
+ 155:font.c        **** void
+ 156:font.c        **** font_mode (uint8_t mode)
+ 157:font.c        **** {
+ 216               		.loc 1 157 0
+ 217               		.cfi_startproc
+ 218               	.LVL26:
+ 219               	/* prologue: function */
+ 220               	/* frame size = 0 */
+ 221               	/* stack size = 0 */
+ 222               	.L__stack_usage = 0
+ 158:font.c        ****     font_draw_mode = mode;
+ 223               		.loc 1 158 0
+ 224 00ae 8093 0000 		sts font_draw_mode,r24
+ 225 00b2 0895      		ret
+ 226               		.cfi_endproc
+ 227               	.LFE13:
+ 229               	.global	font_backspace
+ 231               	font_backspace:
+ 232               	.LFB19:
+ 159:font.c        **** }
+ 160:font.c        **** 
+ 161:font.c        **** /////////////////////////////////////////////////////////////////////////////
+ 162:font.c        **** /// Draw a string on screen
+ 163:font.c        **** /// 
+ 164:font.c        **** /// @param [in] stringP Pointer to a PROGMEM string. 
+ 165:font.c        **** void
+ 166:font.c        **** font_draw_stringP (const char *stringP)
+ 167:font.c        **** {
+ 168:font.c        ****     char cc;
+ 169:font.c        ****     
+ 170:font.c        ****     while ((cc = pgm_read_byte (stringP++)) != '\0')
+ 171:font.c        ****         font_draw (cc);
+ 172:font.c        **** }
+ 173:font.c        ****     
+ 174:font.c        **** /////////////////////////////////////////////////////////////////////////////
+ 175:font.c        **** /// Draw a on/off string on screen
+ 176:font.c        **** /// 
+ 177:font.c        **** /// @param [in] value When '0' draws 'off' else 'on'
+ 178:font.c        **** void
+ 179:font.c        **** font_draw_on_off (uint8_t value)
+ 180:font.c        **** {
+ 181:font.c        ****     static const char on [] PROGMEM = "on";
+ 182:font.c        ****     static const char off [] PROGMEM = "off";    
+ 183:font.c        ****     
+ 184:font.c        ****     font_draw_stringP ((value == 0) ? off : on);
+ 185:font.c        **** }
+ 186:font.c        ****     
+ 187:font.c        **** /////////////////////////////////////////////////////////////////////////////
+ 188:font.c        **** /// Draw a string on screen
+ 189:font.c        **** /// 
+ 190:font.c        **** /// @param [in] value The value to render.
+ 191:font.c        **** void
+ 192:font.c        **** font_draw_number (int16_t value)
+ 193:font.c        **** {
+ 194:font.c        ****     char buf [6];                       // Draw buffer
+ 195:font.c        ****     char *p = &buf[5];                  // Local pointer
+ 196:font.c        ****     
+ 197:font.c        ****     // Nil terminate the string
+ 198:font.c        ****     *p = '\0';
+ 199:font.c        **** 
+ 200:font.c        ****     // Sort out the sign
+ 201:font.c        ****     if (value < 0)
+ 202:font.c        ****     {
+ 203:font.c        ****         // Draw the sign and make positive
+ 204:font.c        ****         font_draw ('-');
+ 205:font.c        ****         value = -value;
+ 206:font.c        ****     }
+ 207:font.c        **** 
+ 208:font.c        ****     // Convert to a ASCII decimal string representation.
+ 209:font.c        ****     do
+ 210:font.c        ****     {
+ 211:font.c        ****         *--p = '0' + (uint8_t)(value % 10);
+ 212:font.c        ****         value /= 10;
+ 213:font.c        ****     }
+ 214:font.c        ****     while (value > 0);
+ 215:font.c        ****     
+ 216:font.c        ****     // Display the output
+ 217:font.c        ****     do
+ 218:font.c        ****     {
+ 219:font.c        ****         font_draw (*p++);
+ 220:font.c        ****     }
+ 221:font.c        ****     while (*p != '\0');
+ 222:font.c        **** }
+ 223:font.c        **** 
+ 224:font.c        **** /////////////////////////////////////////////////////////////////////////////
+ 225:font.c        **** /// Layout a string in the x-axis for labelling. This is used for
+ 226:font.c        **** /// proporitional fonts and computes the length of a 0xff terminated string
+ 227:font.c        **** /// and positions the string either centre or right justified. The call sets
+ 228:font.c        **** /// the position to the (x,y) corrected for the justification of the text.
+ 229:font.c        **** /// 
+ 230:font.c        **** /// The command only works for serial data and leaves the chatacters to be
+ 231:font.c        **** /// rendered in the input buffer. The characters are looked ahead and the
+ 232:font.c        **** /// length is computed. When the command finishes then the characters are
+ 233:font.c        **** /// rendered. Graphics mode is automatically turned off.
+ 234:font.c        **** /// 
+ 235:font.c        **** /// @param [in] x The x reference position
+ 236:font.c        **** /// @param [in] y The y reference position
+ 237:font.c        **** /// @param [in] justification The rendering position 0=centre, 1=right 
+ 238:font.c        **** void
+ 239:font.c        **** font_layout (uint8_t x, uint8_t y, uint8_t justification)
+ 240:font.c        **** {
+ 241:font.c        ****     uint8_t length = 0;                 // Length of string in pixels
+ 242:font.c        ****     uint8_t count = 0;                  // Length of string in chars
+ 243:font.c        ****     uint8_t txt;                        // The current character
+ 244:font.c        ****     
+ 245:font.c        ****     // Iterate until the end of the string. Look ahead in the input buffer
+ 246:font.c        ****     // and collect characters. 
+ 247:font.c        ****     while ((txt = serial_peek(count)) != 0xff)
+ 248:font.c        ****     {
+ 249:font.c        ****         uint16_t ii;
+ 250:font.c        ****         uint16_t offset;
+ 251:font.c        ****         
+ 252:font.c        ****         // Make sure the text is in bounds otherwise print a question mark.
+ 253:font.c        ****         if ((txt < font_first_char) || (txt > font_last_char))
+ 254:font.c        ****             txt = font_first_char;      // Correct out of bounds
+ 255:font.c        ****         
+ 256:font.c        ****         // txt-32 is the ascii offset to 'space', font_bytes is the # of
+ 257:font.c        ****         // bytes/character, and 5 for font width,height,space, first_char and
+ 258:font.c        ****         // last_char which are stores at the beginning of the array
+ 259:font.c        ****         offset = (txt - font_first_char) * font_bytes + FONT_FILE_HEADER_LEN;
+ 260:font.c        ****         
+ 261:font.c        ****         // Compute the width of the character.
+ 262:font.c        ****         for (ii = offset; ii < offset + font_bytes; ii++)
+ 263:font.c        ****         {
+ 264:font.c        ****             uint8_t cc = pgm_read_byte (&font_ptr[ii]);
+ 265:font.c        ****             
+ 266:font.c        ****             // If the font is proportional then remove any blank verticals
+ 267:font.c        ****             // only if the character is not a space and the font size is less
+ 268:font.c        ****             // than or equal to 8 pixels. 
+ 269:font.c        ****             if ((cc != 0) || (txt == 0x20) || ((font_draw_mode & MODE_PROP_FONT) == 0) || (font_h >
+ 270:font.c        ****             {
+ 271:font.c        ****                 length++;
+ 272:font.c        ****             }
+ 273:font.c        ****         }
+ 274:font.c        ****         
+ 275:font.c        ****         // Account for intercharacter space.
+ 276:font.c        ****         if (count > 0)
+ 277:font.c        ****             length += font_space;
+ 278:font.c        ****         
+ 279:font.c        ****         // Another character processed.
+ 280:font.c        ****         count++;
+ 281:font.c        ****     }
+ 282:font.c        ****     
+ 283:font.c        ****     // Compute the position to render the string. Note we do not correct any
+ 284:font.c        ****     // user mistakes this results in a rendering anomaly. 
+ 285:font.c        ****     if (justification == FONT_ALIGN_CENTER)
+ 286:font.c        ****         length = (length + 1) >> 1;     // Divide by 2
+ 287:font.c        ****     x -= length;                        // Position x
+ 288:font.c        ****     
+ 289:font.c        ****     // Change the position 
+ 290:font.c        ****     font_position (x, y, 0);
+ 291:font.c        ****     
+ 292:font.c        ****     // Explicitly turn off graphics mode.
+ 293:font.c        ****     prefs_graphics = 0;
+ 294:font.c        **** }
+ 295:font.c        ****     
+ 296:font.c        **** //////////////////////////////////////////////////////////////////////////////
+ 297:font.c        **** /// Draw a character on the screen. The x_pos, y_pos define the top/left
+ 298:font.c        **** /// of the corner of the character and are automatically updated for the next
+ 299:font.c        **** /// character.
+ 300:font.c        **** ///
+ 301:font.c        **** /// @param [in] txt The character to draw.
+ 302:font.c        **** ///                 If the character is not present we present a square box.
+ 303:font.c        **** ///
+ 304:font.c        **** void
+ 305:font.c        **** font_draw (char txt)
+ 306:font.c        **** {
+ 307:font.c        ****     uint16_t offset;                    // Offset into the text array
+ 308:font.c        ****     uint16_t ii;                        // Loop counter.
+ 309:font.c        ****     uint8_t jj;                         // Buffer position.
+ 310:font.c        ****     uint8_t mode;                       // The rendering mode.
+ 311:font.c        ****     uint8_t bltpos;                     // The bit blit position
+ 312:font.c        ****     uint8_t actual_width;               // The actual width 
+ 313:font.c        ****     
+ 314:font.c        ****     // Quit quickly on character 0xff which is a terminal character for the
+ 315:font.c        ****     // text layout. 
+ 316:font.c        ****     if (~txt == 0)
+ 317:font.c        ****         return;
+ 318:font.c        ****     
+ 319:font.c        ****     // y_pos counts pixels from the top of the screen
+ 320:font.c        ****     // x_pos counts pixels from the left side of the screen
+ 321:font.c        ****     
+ 322:font.c        ****     // A delayed LF, if the character position is off screen then wrap the
+ 323:font.c        ****     // position to the top of the screen or scroll the screen up. 
+ 324:font.c        ****     if (y_pos > (y_dim - font_h))
+ 325:font.c        ****     {
+ 326:font.c        ****         // See if we need to scroll
+ 327:font.c        ****         if (is_scroll())
+ 328:font.c        ****         {
+ 329:font.c        ****             // Scroll the screen up by 1 line.
+ 330:font.c        ****             lcd_vscroll (draw_buffer, -8, prefs_reverse);
+ 331:font.c        ****             
+ 332:font.c        ****             // Decrement the font position.
+ 333:font.c        ****             y_pos -= font_h;
+ 334:font.c        ****         }
+ 335:font.c        ****         else
+ 336:font.c        ****         {
+ 337:font.c        ****             // Make sure that the line restarted at the top will overlap the
+ 338:font.c        ****             // old one 
+ 339:font.c        ****             y_pos = y_pos % font_h;
+ 340:font.c        ****         }
+ 341:font.c        ****         
+ 342:font.c        ****         // Invalidate the previous position
+ 343:font.c        ****         font_xpos = ~0;
+ 344:font.c        ****         font_ypos = ~0;
+ 345:font.c        ****     }
+ 346:font.c        **** 
+ 347:font.c        ****     // Compute the current mode based on the reverse preference.
+ 348:font.c        ****     mode = (~font_draw_mode ^ prefs_reverse) & MODE_NORMAL_MASK;
+ 349:font.c        ****     mode |= font_draw_mode & ~MODE_NORMAL_MASK;
+ 350:font.c        **** 
+ 351:font.c        ****     // Make sure the text is in bounds otherwise print a question mark.
+ 352:font.c        ****     if ((txt < font_first_char) || (txt > font_last_char))
+ 353:font.c        ****         txt = font_first_char;          // Correct out of bounds
+ 354:font.c        **** 
+ 355:font.c        ****     // Get data for character. Put in upper half of buffer, lower half is
+ 356:font.c        ****     // used by bitblt
+ 357:font.c        ****     bltpos = SCREEN_MAX_WIDTH - font_bytes;
+ 358:font.c        ****     jj = bltpos;
+ 359:font.c        **** 
+ 360:font.c        ****     // txt-32 is the ascii offset to 'space', font_bytes is the # of
+ 361:font.c        ****     // bytes/character, and 5 for font width,height,space, first_char and
+ 362:font.c        ****     // last_char which are stores at the beginning of the array
+ 363:font.c        ****     offset = (txt - font_first_char) * font_bytes + FONT_FILE_HEADER_LEN;
+ 364:font.c        ****     
+ 365:font.c        ****     // loop for one character worth of bytes
+ 366:font.c        ****     actual_width = 0;
+ 367:font.c        ****     for (ii = offset; ii < offset + font_bytes; ii++)
+ 368:font.c        ****     {
+ 369:font.c        ****         uint8_t cc = pgm_read_byte (&font_ptr[ii]);
+ 370:font.c        ****         
+ 371:font.c        ****         // If the font is proportional then remove any blank verticals only
+ 372:font.c        ****         // if the character is not a space and the font size is less than or
+ 373:font.c        ****         // equal to 8 pixels. 
+ 374:font.c        ****         if ((cc != 0) || (txt == 0x20) || ((font_draw_mode & MODE_PROP_FONT) == 0) || (font_h > 8))
+ 375:font.c        ****         {
+ 376:font.c        ****             font_buffer[jj++] = cc;
+ 377:font.c        ****             actual_width++;
+ 378:font.c        ****         }
+ 379:font.c        ****     }
+ 380:font.c        **** 
+ 381:font.c        ****     // See if we need to insert some space between the last character.
+ 382:font.c        ****     if ((font_space > 0) && (x_pos > font_space) &&
+ 383:font.c        ****         (font_xpos == x_pos) && (font_ypos == y_pos))
+ 384:font.c        ****     {
+ 385:font.c        ****         uint8_t data = 0x00;
+ 386:font.c        ****         lcd_vbitblt (x_pos - font_space, y_pos,
+ 387:font.c        ****                      font_space, font_h, mode | MODE_FILL, &data);
+ 388:font.c        ****     }
+ 389:font.c        **** 
+ 390:font.c        ****     // Render the character to the screen.
+ 391:font.c        ****     lcd_vbitblt (x_pos, y_pos, actual_width, font_h, mode, &font_buffer[bltpos]);
+ 392:font.c        **** 
+ 393:font.c        ****     // Advance the current cursor position.
+ 394:font.c        ****     x_pos += actual_width + font_space;
+ 395:font.c        **** 
+ 396:font.c        ****     // Check x offset and do necessary wrapping
+ 397:font.c        ****     if ((x_pos + font_w) > x_dim - 1)
+ 398:font.c        ****     {
+ 399:font.c        ****         // Make sure text on the next line will line up with the previous
+ 400:font.c        ****         // line and perform a line feed operation.
+ 401:font.c        ****         x_pos = font_start_xpos; /*%= font_ws*/;
+ 402:font.c        ****         font_lf ();
+ 403:font.c        ****     }
+ 404:font.c        ****     else
+ 405:font.c        ****     {
+ 406:font.c        ****         // Save the last position.
+ 407:font.c        ****         font_xpos = x_pos;
+ 408:font.c        ****         font_ypos = y_pos;
+ 409:font.c        ****     }
+ 410:font.c        **** }
+ 411:font.c        **** 
+ 412:font.c        **** //////////////////////////////////////////////////////////////////////////////
+ 413:font.c        **** /// Deletes a full character space previous to the current location
+ 414:font.c        **** /// (backspace).
+ 415:font.c        **** ///
+ 416:font.c        **** void
+ 417:font.c        **** font_backspace (void)
+ 418:font.c        **** {
+ 233               		.loc 1 418 0
+ 234               		.cfi_startproc
+ 235 00b4 0F93      		push r16
+ 236               	.LCFI4:
+ 237               		.cfi_def_cfa_offset 3
+ 238               		.cfi_offset 16, -2
+ 239               	/* prologue: function */
+ 240               	/* frame size = 0 */
+ 241               	/* stack size = 1 */
+ 242               	.L__stack_usage = 1
+ 419:font.c        ****     if (x_pos < font_ws)
+ 243               		.loc 1 419 0
+ 244 00b6 4091 0000 		lds r20,x_pos
+ 245 00ba 6091 0000 		lds r22,font_ws
+ 246 00be 2091 0000 		lds r18,font_h
+ 247 00c2 4617      		cp r20,r22
+ 248 00c4 00F4      		brsh .L11
+ 420:font.c        ****     {
+ 421:font.c        ****         // If previous char wouldn't have fit
+ 422:font.c        ****         x_pos = (x_dim - font_ws - ((x_dim - x_pos) % font_ws));
+ 249               		.loc 1 422 0
+ 250 00c6 8091 0000 		lds r24,x_dim
+ 251 00ca 382F      		mov r19,r24
+ 252 00cc 361B      		sub r19,r22
+ 253 00ce 90E0      		ldi r25,0
+ 254 00d0 841B      		sub r24,r20
+ 255 00d2 9109      		sbc r25,__zero_reg__
+ 256 00d4 70E0      		ldi r23,0
+ 257 00d6 0E94 0000 		call __divmodhi4
+ 258 00da 381B      		sub r19,r24
+ 259 00dc 3093 0000 		sts x_pos,r19
+ 423:font.c        **** 
+ 424:font.c        ****         if (y_pos < font_h)
+ 260               		.loc 1 424 0
+ 261 00e0 4091 0000 		lds r20,y_pos
+ 262 00e4 4217      		cp r20,r18
+ 263 00e6 00F4      		brsh .L12
+ 425:font.c        ****         {
+ 426:font.c        ****             // If we run off the top of the screen
+ 427:font.c        ****             y_pos = (y_dim - font_h - ((y_dim - y_pos) % font_h));
+ 264               		.loc 1 427 0
+ 265 00e8 8091 0000 		lds r24,y_dim
+ 266 00ec 382F      		mov r19,r24
+ 267 00ee 321B      		sub r19,r18
+ 268 00f0 90E0      		ldi r25,0
+ 269 00f2 841B      		sub r24,r20
+ 270 00f4 9109      		sbc r25,__zero_reg__
+ 271 00f6 622F      		mov r22,r18
+ 272 00f8 70E0      		ldi r23,0
+ 273 00fa 0E94 0000 		call __divmodhi4
+ 274 00fe 381B      		sub r19,r24
+ 275 0100 3093 0000 		sts y_pos,r19
+ 276 0104 00C0      		rjmp .L13
+ 277               	.L12:
+ 428:font.c        ****         }
+ 429:font.c        ****         else
+ 430:font.c        ****             y_pos -= font_h;
+ 278               		.loc 1 430 0
+ 279 0106 421B      		sub r20,r18
+ 280 0108 4093 0000 		sts y_pos,r20
+ 281 010c 00C0      		rjmp .L13
+ 282               	.L11:
+ 431:font.c        ****     }
+ 432:font.c        ****     else
+ 433:font.c        ****     {
+ 434:font.c        **** 
+ 435:font.c        ****         // Back x_pos up by the font width + 1 pixel space between characters
+ 436:font.c        ****         x_pos -= font_ws;
+ 283               		.loc 1 436 0
+ 284 010e 461B      		sub r20,r22
+ 285 0110 4093 0000 		sts x_pos,r20
+ 286               	.L13:
+ 437:font.c        ****     }
+ 438:font.c        **** 
+ 439:font.c        ****     // Erase the block
+ 440:font.c        ****     fill_box (x_pos, y_pos,
+ 287               		.loc 1 440 0
+ 288 0114 6091 0000 		lds r22,y_pos
+ 289 0118 8091 0000 		lds r24,x_pos
+ 441:font.c        ****               x_pos + font_w,
+ 442:font.c        ****               y_pos + font_h - 1,
+ 443:font.c        ****               ~prefs_reverse & MODE_NORMAL_MASK);
+ 290               		.loc 1 443 0
+ 291 011c 0091 0000 		lds r16,prefs+4
+ 292 0120 0095      		com r16
+ 293 0122 0170      		andi r16,lo8(1)
+ 440:font.c        ****     fill_box (x_pos, y_pos,
+ 294               		.loc 1 440 0
+ 295 0124 260F      		add r18,r22
+ 296 0126 2150      		subi r18,lo8(-(-1))
+ 297 0128 4091 0000 		lds r20,font_w
+ 298 012c 480F      		add r20,r24
+ 299 012e 0E94 0000 		call fill_box
+ 300               	.LVL27:
+ 301               	/* epilogue start */
+ 444:font.c        **** }
+ 302               		.loc 1 444 0
+ 303 0132 0F91      		pop r16
+ 304 0134 0895      		ret
+ 305               		.cfi_endproc
+ 306               	.LFE19:
+ 308               	.global	font_cr
+ 310               	font_cr:
+ 311               	.LFB20:
+ 445:font.c        **** 
+ 446:font.c        **** //////////////////////////////////////////////////////////////////////////////
+ 447:font.c        **** /// Performs a CR operation. This moves the cursor back to the start position.
+ 448:font.c        **** /// If the CRLF option is enabled then a new line will be performed.
+ 449:font.c        **** ///
+ 450:font.c        **** void
+ 451:font.c        **** font_cr (void)
+ 452:font.c        **** {
+ 312               		.loc 1 452 0
+ 313               		.cfi_startproc
+ 314               	/* prologue: function */
+ 315               	/* frame size = 0 */
+ 316               	/* stack size = 0 */
+ 317               	.L__stack_usage = 0
+ 453:font.c        ****     // Perform a CR i.e. move the cursor back to the start of the line. 
+ 454:font.c        ****     x_pos = font_start_xpos; /* %= font_ws */
+ 318               		.loc 1 454 0
+ 319 0136 8091 0000 		lds r24,font_start_xpos
+ 320 013a 8093 0000 		sts x_pos,r24
+ 455:font.c        **** 
+ 456:font.c        ****     // Invalidate the previous position
+ 457:font.c        ****     font_xpos = ~0;
+ 321               		.loc 1 457 0
+ 322 013e 8FEF      		ldi r24,lo8(-1)
+ 323 0140 8093 0000 		sts font_xpos,r24
+ 458:font.c        ****     font_ypos = ~0;
+ 324               		.loc 1 458 0
+ 325 0144 8093 0000 		sts font_ypos,r24
+ 326 0148 0895      		ret
+ 327               		.cfi_endproc
+ 328               	.LFE20:
+ 330               	.global	font_lf
+ 332               	font_lf:
+ 333               	.LFB21:
+ 459:font.c        **** }
+ 460:font.c        **** 
+ 461:font.c        **** //////////////////////////////////////////////////////////////////////////////
+ 462:font.c        **** /// Performs a LF operation.
+ 463:font.c        **** ///
+ 464:font.c        **** void
+ 465:font.c        **** font_lf (void)
+ 466:font.c        **** {
+ 334               		.loc 1 466 0
+ 335               		.cfi_startproc
+ 336               	/* prologue: function */
+ 337               	/* frame size = 0 */
+ 338               	/* stack size = 0 */
+ 339               	.L__stack_usage = 0
+ 467:font.c        ****     // Handle a new line additional scroll, determine if we need to scroll.
+ 468:font.c        ****     if (y_pos >= y_dim) 
+ 340               		.loc 1 468 0
+ 341 014a 8091 0000 		lds r24,y_pos
+ 342 014e 9091 0000 		lds r25,y_dim
+ 343 0152 8917      		cp r24,r25
+ 344 0154 00F0      		brlo .L16
+ 469:font.c        ****     {
+ 470:font.c        ****         if (is_scroll())
+ 345               		.loc 1 470 0
+ 346 0156 9091 0000 		lds r25,prefs+9
+ 347 015a 9111      		cpse r25,__zero_reg__
+ 348 015c 00C0      		rjmp .L17
+ 349               	.LBB7:
+ 471:font.c        ****         {
+ 472:font.c        ****             // There is a scroll pending when we render the next character. To
+ 473:font.c        ****             // provide an interactive feedback then perform a scroll now. Scroll
+ 474:font.c        ****             // the screen up by 1 line. 
+ 475:font.c        ****             lcd_vscroll (draw_buffer, -8, prefs_reverse);
+ 350               		.loc 1 475 0
+ 351 015e E091 0000 		lds r30,functabP
+ 352 0162 F091 0000 		lds r31,functabP+1
+ 353 0166 3E96      		adiw r30,14
+ 354               	.LVL28:
+ 355               	/* #APP */
+ 356               	 ;  475 "font.c" 1
+ 357 0168 2591      		lpm r18, Z+
+ 358 016a 3491      		lpm r19, Z
+ 359               		
+ 360               	 ;  0 "" 2
+ 361               	.LVL29:
+ 362               	/* #NOAPP */
+ 363               	.LBE7:
+ 364 016c 4091 0000 		lds r20,prefs+4
+ 365 0170 68EF      		ldi r22,lo8(-8)
+ 366 0172 80E0      		ldi r24,lo8(draw_buffer)
+ 367 0174 90E0      		ldi r25,hi8(draw_buffer)
+ 368 0176 F901      		movw r30,r18
+ 369 0178 0995      		icall
+ 370               	.LVL30:
+ 371 017a 00C0      		rjmp .L18
+ 372               	.L17:
+ 476:font.c        ****         }
+ 477:font.c        ****         else
+ 478:font.c        ****         {
+ 479:font.c        ****             // Make sure that the line restarted at the top will overlap the
+ 480:font.c        ****             // old one 
+ 481:font.c        ****             y_pos %= font_h;
+ 373               		.loc 1 481 0
+ 374 017c 6091 0000 		lds r22,font_h
+ 375 0180 0E94 0000 		call __udivmodqi4
+ 376 0184 00C0      		rjmp .L20
+ 377               	.L16:
+ 482:font.c        ****         }
+ 483:font.c        ****     }
+ 484:font.c        ****     else
+ 485:font.c        ****     {
+ 486:font.c        ****         // Advance the line offset, note that this is not enacted until the next
+ 487:font.c        ****         // character is draw so that we keep as much information on the screen as
+ 488:font.c        ****         // possible in the case that we scroll.
+ 489:font.c        ****         y_pos += font_h;
+ 378               		.loc 1 489 0
+ 379 0186 9091 0000 		lds r25,font_h
+ 380 018a 980F      		add r25,r24
+ 381               	.L20:
+ 382 018c 9093 0000 		sts y_pos,r25
+ 383               	.L18:
+ 490:font.c        ****     }
+ 491:font.c        ****     
+ 492:font.c        ****     // If there is LF preference then enact.
+ 493:font.c        ****     if (is_crlf())
+ 384               		.loc 1 493 0
+ 385 0190 8091 0000 		lds r24,prefs+6
+ 386 0194 8111      		cpse r24,__zero_reg__
+ 387 0196 00C0      		rjmp .L19
+ 494:font.c        ****         font_cr ();
+ 388               		.loc 1 494 0
+ 389 0198 0E94 0000 		call font_cr
+ 390               	.LVL31:
+ 391               	.L19:
+ 495:font.c        ****     
+ 496:font.c        ****     // Invalidate the previous position
+ 497:font.c        ****     font_xpos = ~0;
+ 392               		.loc 1 497 0
+ 393 019c 8FEF      		ldi r24,lo8(-1)
+ 394 019e 8093 0000 		sts font_xpos,r24
+ 498:font.c        ****     font_ypos = ~0;
+ 395               		.loc 1 498 0
+ 396 01a2 8093 0000 		sts font_ypos,r24
+ 397 01a6 0895      		ret
+ 398               		.cfi_endproc
+ 399               	.LFE21:
+ 401               	.global	font_draw
+ 403               	font_draw:
+ 404               	.LFB18:
+ 306:font.c        **** {
+ 405               		.loc 1 306 0
+ 406               		.cfi_startproc
+ 407               	.LVL32:
+ 408 01a8 CF92      		push r12
+ 409               	.LCFI5:
+ 410               		.cfi_def_cfa_offset 3
+ 411               		.cfi_offset 12, -2
+ 412 01aa DF92      		push r13
+ 413               	.LCFI6:
+ 414               		.cfi_def_cfa_offset 4
+ 415               		.cfi_offset 13, -3
+ 416 01ac EF92      		push r14
+ 417               	.LCFI7:
+ 418               		.cfi_def_cfa_offset 5
+ 419               		.cfi_offset 14, -4
+ 420 01ae FF92      		push r15
+ 421               	.LCFI8:
+ 422               		.cfi_def_cfa_offset 6
+ 423               		.cfi_offset 15, -5
+ 424 01b0 0F93      		push r16
+ 425               	.LCFI9:
+ 426               		.cfi_def_cfa_offset 7
+ 427               		.cfi_offset 16, -6
+ 428 01b2 1F93      		push r17
+ 429               	.LCFI10:
+ 430               		.cfi_def_cfa_offset 8
+ 431               		.cfi_offset 17, -7
+ 432 01b4 CF93      		push r28
+ 433               	.LCFI11:
+ 434               		.cfi_def_cfa_offset 9
+ 435               		.cfi_offset 28, -8
+ 436 01b6 DF93      		push r29
+ 437               	.LCFI12:
+ 438               		.cfi_def_cfa_offset 10
+ 439               		.cfi_offset 29, -9
+ 440 01b8 1F92      		push __zero_reg__
+ 441               	.LCFI13:
+ 442               		.cfi_def_cfa_offset 11
+ 443 01ba CDB7      		in r28,__SP_L__
+ 444 01bc DEB7      		in r29,__SP_H__
+ 445               	.LCFI14:
+ 446               		.cfi_def_cfa_register 28
+ 447               	/* prologue: function */
+ 448               	/* frame size = 1 */
+ 449               	/* stack size = 9 */
+ 450               	.L__stack_usage = 9
+ 451 01be 082F      		mov r16,r24
+ 324:font.c        ****     if (y_pos > (y_dim - font_h))
+ 452               		.loc 1 324 0
+ 453 01c0 8091 0000 		lds r24,y_pos
+ 454               	.LVL33:
+ 455 01c4 6091 0000 		lds r22,font_h
+ 456 01c8 482F      		mov r20,r24
+ 457 01ca 50E0      		ldi r21,0
+ 458 01cc 2091 0000 		lds r18,y_dim
+ 459 01d0 30E0      		ldi r19,0
+ 460 01d2 261B      		sub r18,r22
+ 461 01d4 3109      		sbc r19,__zero_reg__
+ 462 01d6 2417      		cp r18,r20
+ 463 01d8 3507      		cpc r19,r21
+ 464 01da 04F4      		brge .L22
+ 327:font.c        ****         if (is_scroll())
+ 465               		.loc 1 327 0
+ 466 01dc 9091 0000 		lds r25,prefs+9
+ 467 01e0 9111      		cpse r25,__zero_reg__
+ 468 01e2 00C0      		rjmp .L23
+ 469               	.LBB8:
+ 330:font.c        ****             lcd_vscroll (draw_buffer, -8, prefs_reverse);
+ 470               		.loc 1 330 0
+ 471 01e4 E091 0000 		lds r30,functabP
+ 472 01e8 F091 0000 		lds r31,functabP+1
+ 473 01ec 3E96      		adiw r30,14
+ 474               	.LVL34:
+ 475               	/* #APP */
+ 476               	 ;  330 "font.c" 1
+ 477 01ee 2591      		lpm r18, Z+
+ 478 01f0 3491      		lpm r19, Z
+ 479               		
+ 480               	 ;  0 "" 2
+ 481               	.LVL35:
+ 482               	/* #NOAPP */
+ 483               	.LBE8:
+ 484 01f2 4091 0000 		lds r20,prefs+4
+ 485 01f6 68EF      		ldi r22,lo8(-8)
+ 486 01f8 80E0      		ldi r24,lo8(draw_buffer)
+ 487 01fa 90E0      		ldi r25,hi8(draw_buffer)
+ 488 01fc F901      		movw r30,r18
+ 489 01fe 0995      		icall
+ 490               	.LVL36:
+ 333:font.c        ****             y_pos -= font_h;
+ 491               		.loc 1 333 0
+ 492 0200 8091 0000 		lds r24,y_pos
+ 493 0204 9091 0000 		lds r25,font_h
+ 494 0208 891B      		sub r24,r25
+ 495 020a 8093 0000 		sts y_pos,r24
+ 496 020e 00C0      		rjmp .L24
+ 497               	.L23:
+ 339:font.c        ****             y_pos = y_pos % font_h;
+ 498               		.loc 1 339 0
+ 499 0210 0E94 0000 		call __udivmodqi4
+ 500 0214 9093 0000 		sts y_pos,r25
+ 501               	.L24:
+ 343:font.c        ****         font_xpos = ~0;
+ 502               		.loc 1 343 0
+ 503 0218 8FEF      		ldi r24,lo8(-1)
+ 504 021a 8093 0000 		sts font_xpos,r24
+ 344:font.c        ****         font_ypos = ~0;
+ 505               		.loc 1 344 0
+ 506 021e 8093 0000 		sts font_ypos,r24
+ 507               	.L22:
+ 348:font.c        ****     mode = (~font_draw_mode ^ prefs_reverse) & MODE_NORMAL_MASK;
+ 508               		.loc 1 348 0
+ 509 0222 E091 0000 		lds r30,font_draw_mode
+ 510               	.LVL37:
+ 511 0226 8E2F      		mov r24,r30
+ 512 0228 8095      		com r24
+ 513 022a 9091 0000 		lds r25,prefs+4
+ 514 022e 8927      		eor r24,r25
+ 349:font.c        ****     mode |= font_draw_mode & ~MODE_NORMAL_MASK;
+ 515               		.loc 1 349 0
+ 516 0230 1E2F      		mov r17,r30
+ 517 0232 80FB      		bst r24,0
+ 518 0234 10F9      		bld r17,0
+ 519               	.LVL38:
+ 352:font.c        ****     if ((txt < font_first_char) || (txt > font_last_char))
+ 520               		.loc 1 352 0
+ 521 0236 8091 0000 		lds r24,font_first_char
+ 522 023a 0817      		cp r16,r24
+ 523 023c 00F0      		brlo .L34
+ 352:font.c        ****     if ((txt < font_first_char) || (txt > font_last_char))
+ 524               		.loc 1 352 0 is_stmt 0 discriminator 1
+ 525 023e 9091 0000 		lds r25,font_last_char
+ 526 0242 9017      		cp r25,r16
+ 527 0244 00F4      		brsh .L25
+ 528               	.L34:
+ 529 0246 082F      		mov r16,r24
+ 530               	.LVL39:
+ 531               	.L25:
+ 357:font.c        ****     bltpos = SCREEN_MAX_WIDTH - font_bytes;
+ 532               		.loc 1 357 0 is_stmt 1
+ 533 0248 6091 0000 		lds r22,font_bytes
+ 534 024c 90EA      		ldi r25,lo8(-96)
+ 535 024e C92E      		mov r12,r25
+ 536 0250 C61A      		sub r12,r22
+ 537               	.LVL40:
+ 363:font.c        ****     offset = (txt - font_first_char) * font_bytes + FONT_FILE_HEADER_LEN;
+ 538               		.loc 1 363 0
+ 539 0252 402F      		mov r20,r16
+ 540 0254 50E0      		ldi r21,0
+ 541 0256 481B      		sub r20,r24
+ 542 0258 5109      		sbc r21,__zero_reg__
+ 543 025a 70E0      		ldi r23,0
+ 544 025c 469F      		mul r20,r22
+ 545 025e 9001      		movw r18,r0
+ 546 0260 479F      		mul r20,r23
+ 547 0262 300D      		add r19,r0
+ 548 0264 569F      		mul r21,r22
+ 549 0266 300D      		add r19,r0
+ 550 0268 1124      		clr r1
+ 551               	.LVL41:
+ 552               	.LBB9:
+ 553               	.LBB10:
+ 369:font.c        ****         uint8_t cc = pgm_read_byte (&font_ptr[ii]);
+ 554               		.loc 1 369 0
+ 555 026a 8091 0000 		lds r24,font_ptr
+ 556 026e 9091 0000 		lds r25,font_ptr+1
+ 557               	.LBE10:
+ 374:font.c        ****         if ((cc != 0) || (txt == 0x20) || ((font_draw_mode & MODE_PROP_FONT) == 0) || (font_h > 8))
+ 558               		.loc 1 374 0
+ 559 0272 F090 0000 		lds r15,font_h
+ 560               	.LBE9:
+ 358:font.c        ****     jj = bltpos;
+ 561               		.loc 1 358 0
+ 562 0276 4C2D      		mov r20,r12
+ 367:font.c        ****     for (ii = offset; ii < offset + font_bytes; ii++)
+ 563               		.loc 1 367 0
+ 564 0278 2B5F      		subi r18,-5
+ 565 027a 3F4F      		sbci r19,-1
+ 566               	.LVL42:
+ 366:font.c        ****     actual_width = 0;
+ 567               		.loc 1 366 0
+ 568 027c D12C      		mov r13,__zero_reg__
+ 367:font.c        ****     for (ii = offset; ii < offset + font_bytes; ii++)
+ 569               		.loc 1 367 0
+ 570 027e 620F      		add r22,r18
+ 571 0280 731F      		adc r23,r19
+ 572               	.LBB12:
+ 374:font.c        ****         if ((cc != 0) || (txt == 0x20) || ((font_draw_mode & MODE_PROP_FONT) == 0) || (font_h > 8))
+ 573               		.loc 1 374 0
+ 574 0282 E072      		andi r30,lo8(32)
+ 575 0284 EE2E      		mov r14,r30
+ 576               	.LVL43:
+ 577               	.L26:
+ 578               	.LBE12:
+ 367:font.c        ****     for (ii = offset; ii < offset + font_bytes; ii++)
+ 579               		.loc 1 367 0 discriminator 1
+ 580 0286 2617      		cp r18,r22
+ 581 0288 3707      		cpc r19,r23
+ 582 028a 00F4      		brsh .L44
+ 583               	.LVL44:
+ 584 028c FC01      		movw r30,r24
+ 585 028e E20F      		add r30,r18
+ 586 0290 F31F      		adc r31,r19
+ 587               	.LVL45:
+ 588               	.LBB13:
+ 589               	.LBB11:
+ 369:font.c        ****         uint8_t cc = pgm_read_byte (&font_ptr[ii]);
+ 590               		.loc 1 369 0
+ 591               	/* #APP */
+ 592               	 ;  369 "font.c" 1
+ 593 0292 5491      		lpm r21, Z
+ 594               		
+ 595               	 ;  0 "" 2
+ 596               	.LVL46:
+ 597               	/* #NOAPP */
+ 598               	.LBE11:
+ 374:font.c        ****         if ((cc != 0) || (txt == 0x20) || ((font_draw_mode & MODE_PROP_FONT) == 0) || (font_h > 8))
+ 599               		.loc 1 374 0
+ 600 0294 5111      		cpse r21,__zero_reg__
+ 601 0296 00C0      		rjmp .L27
+ 374:font.c        ****         if ((cc != 0) || (txt == 0x20) || ((font_draw_mode & MODE_PROP_FONT) == 0) || (font_h > 8))
+ 602               		.loc 1 374 0 is_stmt 0 discriminator 1
+ 603 0298 0032      		cpi r16,lo8(32)
+ 604 029a 01F0      		breq .L27
+ 605 029c EE20      		tst r14
+ 606 029e 01F0      		breq .L27
+ 607 02a0 F8E0      		ldi r31,lo8(8)
+ 608 02a2 FF15      		cp r31,r15
+ 609 02a4 00F4      		brsh .L28
+ 610               	.L27:
+ 611               	.LVL47:
+ 376:font.c        ****             font_buffer[jj++] = cc;
+ 612               		.loc 1 376 0 is_stmt 1
+ 613 02a6 A42F      		mov r26,r20
+ 614 02a8 B0E0      		ldi r27,0
+ 615 02aa A050      		subi r26,lo8(-(line_buffer))
+ 616 02ac B040      		sbci r27,hi8(-(line_buffer))
+ 617 02ae 5C93      		st X,r21
+ 377:font.c        ****             actual_width++;
+ 618               		.loc 1 377 0
+ 619 02b0 D394      		inc r13
+ 620               	.LVL48:
+ 376:font.c        ****             font_buffer[jj++] = cc;
+ 621               		.loc 1 376 0
+ 622 02b2 4F5F      		subi r20,lo8(-(1))
+ 623               	.LVL49:
+ 624               	.L28:
+ 625               	.LBE13:
+ 367:font.c        ****     for (ii = offset; ii < offset + font_bytes; ii++)
+ 626               		.loc 1 367 0
+ 627 02b4 2F5F      		subi r18,-1
+ 628 02b6 3F4F      		sbci r19,-1
+ 629               	.LVL50:
+ 630 02b8 00C0      		rjmp .L26
+ 631               	.LVL51:
+ 632               	.L44:
+ 382:font.c        ****     if ((font_space > 0) && (x_pos > font_space) &&
+ 633               		.loc 1 382 0
+ 634 02ba 9091 0000 		lds r25,font_space
+ 635 02be 9923      		tst r25
+ 636 02c0 01F0      		breq .L30
+ 382:font.c        ****     if ((font_space > 0) && (x_pos > font_space) &&
+ 637               		.loc 1 382 0 is_stmt 0 discriminator 1
+ 638 02c2 2091 0000 		lds r18,x_pos
+ 639               	.LVL52:
+ 640 02c6 9217      		cp r25,r18
+ 641 02c8 00F4      		brsh .L30
+ 383:font.c        ****         (font_xpos == x_pos) && (font_ypos == y_pos))
+ 642               		.loc 1 383 0 is_stmt 1 discriminator 1
+ 643 02ca 8091 0000 		lds r24,font_xpos
+ 382:font.c        ****     if ((font_space > 0) && (x_pos > font_space) &&
+ 644               		.loc 1 382 0 discriminator 1
+ 645 02ce 8213      		cpse r24,r18
+ 646 02d0 00C0      		rjmp .L30
+ 383:font.c        ****         (font_xpos == x_pos) && (font_ypos == y_pos))
+ 647               		.loc 1 383 0
+ 648 02d2 6091 0000 		lds r22,font_ypos
+ 649 02d6 2091 0000 		lds r18,y_pos
+ 650 02da 6213      		cpse r22,r18
+ 651 02dc 00C0      		rjmp .L30
+ 652               	.LBB14:
+ 385:font.c        ****         uint8_t data = 0x00;
+ 653               		.loc 1 385 0
+ 654 02de 1982      		std Y+1,__zero_reg__
+ 655               	.LBB15:
+ 386:font.c        ****         lcd_vbitblt (x_pos - font_space, y_pos,
+ 656               		.loc 1 386 0
+ 657 02e0 E091 0000 		lds r30,functabP
+ 658 02e4 F091 0000 		lds r31,functabP+1
+ 659 02e8 3A96      		adiw r30,10
+ 660               	.LVL53:
+ 661               	/* #APP */
+ 662               	 ;  386 "font.c" 1
+ 663 02ea A591      		lpm r26, Z+
+ 664 02ec B491      		lpm r27, Z
+ 665               		
+ 666               	 ;  0 "" 2
+ 667               	.LVL54:
+ 668               	/* #NOAPP */
+ 669               	.LBE15:
+ 670 02ee 9E01      		movw r18,r28
+ 671 02f0 2F5F      		subi r18,-1
+ 672 02f2 3F4F      		sbci r19,-1
+ 673 02f4 7901      		movw r14,r18
+ 674 02f6 012F      		mov r16,r17
+ 675               	.LVL55:
+ 676 02f8 0860      		ori r16,lo8(8)
+ 677 02fa 2091 0000 		lds r18,font_h
+ 678 02fe 492F      		mov r20,r25
+ 679               	.LVL56:
+ 680 0300 891B      		sub r24,r25
+ 681 0302 FD01      		movw r30,r26
+ 682 0304 0995      		icall
+ 683               	.LVL57:
+ 684               	.L30:
+ 685               	.LBE14:
+ 686               	.LBB16:
+ 391:font.c        ****     lcd_vbitblt (x_pos, y_pos, actual_width, font_h, mode, &font_buffer[bltpos]);
+ 687               		.loc 1 391 0
+ 688 0306 E091 0000 		lds r30,functabP
+ 689 030a F091 0000 		lds r31,functabP+1
+ 690 030e 3A96      		adiw r30,10
+ 691               	.LVL58:
+ 692               	/* #APP */
+ 693               	 ;  391 "font.c" 1
+ 694 0310 A591      		lpm r26, Z+
+ 695 0312 B491      		lpm r27, Z
+ 696               		
+ 697               	 ;  0 "" 2
+ 698               	.LVL59:
+ 699               	/* #NOAPP */
+ 700               	.LBE16:
+ 701 0314 8C2D      		mov r24,r12
+ 702 0316 90E0      		ldi r25,0
+ 703 0318 8050      		subi r24,lo8(-(line_buffer))
+ 704 031a 9040      		sbci r25,hi8(-(line_buffer))
+ 705 031c 7C01      		movw r14,r24
+ 706 031e 012F      		mov r16,r17
+ 707 0320 2091 0000 		lds r18,font_h
+ 708 0324 4D2D      		mov r20,r13
+ 709 0326 6091 0000 		lds r22,y_pos
+ 710 032a 8091 0000 		lds r24,x_pos
+ 711 032e FD01      		movw r30,r26
+ 712 0330 0995      		icall
+ 713               	.LVL60:
+ 394:font.c        ****     x_pos += actual_width + font_space;
+ 714               		.loc 1 394 0
+ 715 0332 4091 0000 		lds r20,font_space
+ 716 0336 8091 0000 		lds r24,x_pos
+ 717 033a 480F      		add r20,r24
+ 718 033c 4D0D      		add r20,r13
+ 719 033e 4093 0000 		sts x_pos,r20
+ 397:font.c        ****     if ((x_pos + font_w) > x_dim - 1)
+ 720               		.loc 1 397 0
+ 721 0342 2091 0000 		lds r18,x_dim
+ 722 0346 30E0      		ldi r19,0
+ 723 0348 8091 0000 		lds r24,font_w
+ 724 034c 90E0      		ldi r25,0
+ 725 034e 840F      		add r24,r20
+ 726 0350 911D      		adc r25,__zero_reg__
+ 727 0352 8217      		cp r24,r18
+ 728 0354 9307      		cpc r25,r19
+ 729 0356 04F0      		brlt .L31
+ 730               	.LVL61:
+ 401:font.c        ****         x_pos = font_start_xpos; /*%= font_ws*/;
+ 731               		.loc 1 401 0
+ 732 0358 8091 0000 		lds r24,font_start_xpos
+ 733 035c 8093 0000 		sts x_pos,r24
+ 402:font.c        ****         font_lf ();
+ 734               		.loc 1 402 0
+ 735 0360 0E94 0000 		call font_lf
+ 736               	.LVL62:
+ 737 0364 00C0      		rjmp .L21
+ 738               	.L31:
+ 407:font.c        ****         font_xpos = x_pos;
+ 739               		.loc 1 407 0
+ 740 0366 4093 0000 		sts font_xpos,r20
+ 408:font.c        ****         font_ypos = y_pos;
+ 741               		.loc 1 408 0
+ 742 036a 8091 0000 		lds r24,y_pos
+ 743 036e 8093 0000 		sts font_ypos,r24
+ 744               	.L21:
+ 745               	/* epilogue start */
+ 410:font.c        **** }
+ 746               		.loc 1 410 0
+ 747 0372 0F90      		pop __tmp_reg__
+ 748 0374 DF91      		pop r29
+ 749 0376 CF91      		pop r28
+ 750 0378 1F91      		pop r17
+ 751 037a 0F91      		pop r16
+ 752               	.LVL63:
+ 753 037c FF90      		pop r15
+ 754 037e EF90      		pop r14
+ 755 0380 DF90      		pop r13
+ 756               	.LVL64:
+ 757 0382 CF90      		pop r12
+ 758               	.LVL65:
+ 759 0384 0895      		ret
+ 760               		.cfi_endproc
+ 761               	.LFE18:
+ 763               	.global	font_draw_stringP
+ 765               	font_draw_stringP:
+ 766               	.LFB14:
+ 167:font.c        **** {
+ 767               		.loc 1 167 0
+ 768               		.cfi_startproc
+ 769               	.LVL66:
+ 770 0386 CF93      		push r28
+ 771               	.LCFI15:
+ 772               		.cfi_def_cfa_offset 3
+ 773               		.cfi_offset 28, -2
+ 774 0388 DF93      		push r29
+ 775               	.LCFI16:
+ 776               		.cfi_def_cfa_offset 4
+ 777               		.cfi_offset 29, -3
+ 778               	/* prologue: function */
+ 779               	/* frame size = 0 */
+ 780               	/* stack size = 2 */
+ 781               	.L__stack_usage = 2
+ 782 038a FC01      		movw r30,r24
+ 783               	.LVL67:
+ 784               	.L46:
+ 785               	.LBB17:
+ 170:font.c        ****     while ((cc = pgm_read_byte (stringP++)) != '\0')
+ 786               		.loc 1 170 0 discriminator 1
+ 787               	/* #APP */
+ 788               	 ;  170 "font.c" 1
+ 789 038c 8491      		lpm r24, Z
+ 790               		
+ 791               	 ;  0 "" 2
+ 792               	.LVL68:
+ 793               	/* #NOAPP */
+ 794 038e EF01      		movw r28,r30
+ 795 0390 2196      		adiw r28,1
+ 796               	.LVL69:
+ 797               	.LBE17:
+ 798 0392 8823      		tst r24
+ 799 0394 01F0      		breq .L48
+ 171:font.c        ****         font_draw (cc);
+ 800               		.loc 1 171 0
+ 801 0396 0E94 0000 		call font_draw
+ 802               	.LVL70:
+ 803 039a FE01      		movw r30,r28
+ 804 039c 00C0      		rjmp .L46
+ 805               	.LVL71:
+ 806               	.L48:
+ 807               	/* epilogue start */
+ 172:font.c        **** }
+ 808               		.loc 1 172 0
+ 809 039e DF91      		pop r29
+ 810 03a0 CF91      		pop r28
+ 811               	.LVL72:
+ 812 03a2 0895      		ret
+ 813               		.cfi_endproc
+ 814               	.LFE14:
+ 816               	.global	font_draw_on_off
+ 818               	font_draw_on_off:
+ 819               	.LFB15:
+ 180:font.c        **** {
+ 820               		.loc 1 180 0
+ 821               		.cfi_startproc
+ 822               	.LVL73:
+ 823               	/* prologue: function */
+ 824               	/* frame size = 0 */
+ 825               	/* stack size = 0 */
+ 826               	.L__stack_usage = 0
+ 184:font.c        ****     font_draw_stringP ((value == 0) ? off : on);
+ 827               		.loc 1 184 0
+ 828 03a4 8111      		cpse r24,__zero_reg__
+ 829 03a6 00C0      		rjmp .L51
+ 830 03a8 80E0      		ldi r24,lo8(off.2380)
+ 831 03aa 90E0      		ldi r25,hi8(off.2380)
+ 832               	.LVL74:
+ 833 03ac 00C0      		rjmp .L50
+ 834               	.LVL75:
+ 835               	.L51:
+ 836 03ae 80E0      		ldi r24,lo8(on.2379)
+ 837 03b0 90E0      		ldi r25,hi8(on.2379)
+ 838               	.LVL76:
+ 839               	.L50:
+ 184:font.c        ****     font_draw_stringP ((value == 0) ? off : on);
+ 840               		.loc 1 184 0 is_stmt 0 discriminator 3
+ 841 03b2 0C94 0000 		jmp font_draw_stringP
+ 842               	.LVL77:
+ 843               		.cfi_endproc
+ 844               	.LFE15:
+ 846               	.global	font_draw_number
+ 848               	font_draw_number:
+ 849               	.LFB16:
+ 193:font.c        **** {
+ 850               		.loc 1 193 0 is_stmt 1
+ 851               		.cfi_startproc
+ 852               	.LVL78:
+ 853 03b6 0F93      		push r16
+ 854               	.LCFI17:
+ 855               		.cfi_def_cfa_offset 3
+ 856               		.cfi_offset 16, -2
+ 857 03b8 1F93      		push r17
+ 858               	.LCFI18:
+ 859               		.cfi_def_cfa_offset 4
+ 860               		.cfi_offset 17, -3
+ 861 03ba CF93      		push r28
+ 862               	.LCFI19:
+ 863               		.cfi_def_cfa_offset 5
+ 864               		.cfi_offset 28, -4
+ 865 03bc DF93      		push r29
+ 866               	.LCFI20:
+ 867               		.cfi_def_cfa_offset 6
+ 868               		.cfi_offset 29, -5
+ 869 03be 00D0      		rcall .
+ 870 03c0 00D0      		rcall .
+ 871 03c2 00D0      		rcall .
+ 872               	.LCFI21:
+ 873               		.cfi_def_cfa_offset 12
+ 874 03c4 CDB7      		in r28,__SP_L__
+ 875 03c6 DEB7      		in r29,__SP_H__
+ 876               	.LCFI22:
+ 877               		.cfi_def_cfa_register 28
+ 878               	/* prologue: function */
+ 879               	/* frame size = 6 */
+ 880               	/* stack size = 10 */
+ 881               	.L__stack_usage = 10
+ 882 03c8 8C01      		movw r16,r24
+ 883               	.LVL79:
+ 198:font.c        ****     *p = '\0';
+ 884               		.loc 1 198 0
+ 885 03ca 1E82      		std Y+6,__zero_reg__
+ 201:font.c        ****     if (value < 0)
+ 886               		.loc 1 201 0
+ 887 03cc 97FF      		sbrs r25,7
+ 888 03ce 00C0      		rjmp .L53
+ 204:font.c        ****         font_draw ('-');
+ 889               		.loc 1 204 0
+ 890 03d0 8DE2      		ldi r24,lo8(45)
+ 891               	.LVL80:
+ 892 03d2 0E94 0000 		call font_draw
+ 893               	.LVL81:
+ 205:font.c        ****         value = -value;
+ 894               		.loc 1 205 0
+ 895 03d6 1195      		neg r17
+ 896 03d8 0195      		neg r16
+ 897 03da 1109      		sbc r17,__zero_reg__
+ 898               	.LVL82:
+ 899               	.L53:
+ 193:font.c        **** {
+ 900               		.loc 1 193 0 discriminator 1
+ 901 03dc FE01      		movw r30,r28
+ 902 03de 3696      		adiw r30,6
+ 211:font.c        ****         *--p = '0' + (uint8_t)(value % 10);
+ 903               		.loc 1 211 0 discriminator 1
+ 904 03e0 2AE0      		ldi r18,lo8(10)
+ 905 03e2 30E0      		ldi r19,0
+ 906               	.LVL83:
+ 907               	.L55:
+ 908 03e4 C801      		movw r24,r16
+ 909 03e6 B901      		movw r22,r18
+ 910 03e8 0E94 0000 		call __divmodhi4
+ 911 03ec 805D      		subi r24,lo8(-(48))
+ 912 03ee 8293      		st -Z,r24
+ 913               	.LVL84:
+ 212:font.c        ****         value /= 10;
+ 914               		.loc 1 212 0 discriminator 1
+ 915 03f0 8B01      		movw r16,r22
+ 916               	.LVL85:
+ 214:font.c        ****     while (value > 0);
+ 917               		.loc 1 214 0 discriminator 1
+ 918 03f2 6115      		cp r22,__zero_reg__
+ 919 03f4 7105      		cpc r23,__zero_reg__
+ 920 03f6 01F4      		brne .L55
+ 921 03f8 8F01      		movw r16,r30
+ 922               	.LVL86:
+ 923               	.L57:
+ 219:font.c        ****         font_draw (*p++);
+ 924               		.loc 1 219 0 discriminator 1
+ 925 03fa F801      		movw r30,r16
+ 926 03fc 8191      		ld r24,Z+
+ 927               	.LVL87:
+ 928 03fe 8F01      		movw r16,r30
+ 929 0400 0E94 0000 		call font_draw
+ 930               	.LVL88:
+ 221:font.c        ****     while (*p != '\0');
+ 931               		.loc 1 221 0 discriminator 1
+ 932 0404 F801      		movw r30,r16
+ 933 0406 8081      		ld r24,Z
+ 934 0408 8111      		cpse r24,__zero_reg__
+ 935 040a 00C0      		rjmp .L57
+ 936               	/* epilogue start */
+ 222:font.c        **** }
+ 937               		.loc 1 222 0
+ 938 040c 2696      		adiw r28,6
+ 939 040e 0FB6      		in __tmp_reg__,__SREG__
+ 940 0410 F894      		cli
+ 941 0412 DEBF      		out __SP_H__,r29
+ 942 0414 0FBE      		out __SREG__,__tmp_reg__
+ 943 0416 CDBF      		out __SP_L__,r28
+ 944 0418 DF91      		pop r29
+ 945 041a CF91      		pop r28
+ 946 041c 1F91      		pop r17
+ 947 041e 0F91      		pop r16
+ 948               	.LVL89:
+ 949 0420 0895      		ret
+ 950               		.cfi_endproc
+ 951               	.LFE16:
+ 953               	.global	font_position
+ 955               	font_position:
+ 956               	.LFB22:
+ 499:font.c        **** }
+ 500:font.c        **** 
+ 501:font.c        **** //////////////////////////////////////////////////////////////////////////////
+ 502:font.c        **** /// Modify the x and y position
+ 503:font.c        **** ///
+ 504:font.c        **** void
+ 505:font.c        **** font_position (uint8_t arg1, uint8_t arg2, uint8_t cmd)
+ 506:font.c        **** {
+ 957               		.loc 1 506 0
+ 958               		.cfi_startproc
+ 959               	.LVL90:
+ 960               	/* prologue: function */
+ 961               	/* frame size = 0 */
+ 962               	/* stack size = 0 */
+ 963               	.L__stack_usage = 0
+ 507:font.c        ****     if (cmd == CMD_SET_Y_OFFSET)
+ 964               		.loc 1 507 0
+ 965 0422 4931      		cpi r20,lo8(25)
+ 966 0424 01F4      		brne .L59
+ 508:font.c        ****     {
+ 509:font.c        ****         // Y offset change only
+ 510:font.c        ****         y_pos = arg1;
+ 967               		.loc 1 510 0
+ 968 0426 8093 0000 		sts y_pos,r24
+ 969 042a 00C0      		rjmp .L60
+ 970               	.L59:
+ 511:font.c        ****     }
+ 512:font.c        ****     else
+ 513:font.c        ****     {
+ 514:font.c        ****         // Set the x position
+ 515:font.c        ****         x_pos = arg1;
+ 971               		.loc 1 515 0
+ 972 042c 8093 0000 		sts x_pos,r24
+ 516:font.c        ****         font_start_xpos = arg1;
+ 973               		.loc 1 516 0
+ 974 0430 8093 0000 		sts font_start_xpos,r24
+ 517:font.c        ****         
+ 518:font.c        ****         // If this is not an x offset only then set the y position with the
+ 519:font.c        ****         // 2nd argument. 
+ 520:font.c        ****         if (cmd != CMD_SET_X_OFFSET)
+ 975               		.loc 1 520 0
+ 976 0434 4831      		cpi r20,lo8(24)
+ 977 0436 01F0      		breq .L60
+ 521:font.c        ****             y_pos = arg2;
+ 978               		.loc 1 521 0
+ 979 0438 6093 0000 		sts y_pos,r22
+ 980               	.L60:
+ 522:font.c        ****     }
+ 523:font.c        ****     
+ 524:font.c        ****     // Invalidate the previous position
+ 525:font.c        ****     font_xpos = ~0;
+ 981               		.loc 1 525 0
+ 982 043c 8FEF      		ldi r24,lo8(-1)
+ 983               	.LVL91:
+ 984 043e 8093 0000 		sts font_xpos,r24
+ 526:font.c        ****     font_ypos = ~0;
+ 985               		.loc 1 526 0
+ 986 0442 8093 0000 		sts font_ypos,r24
+ 987 0446 0895      		ret
+ 988               		.cfi_endproc
+ 989               	.LFE22:
+ 991               	.global	font_layout
+ 993               	font_layout:
+ 994               	.LFB17:
+ 240:font.c        **** {
+ 995               		.loc 1 240 0
+ 996               		.cfi_startproc
+ 997               	.LVL92:
+ 998 0448 CF92      		push r12
+ 999               	.LCFI23:
+ 1000               		.cfi_def_cfa_offset 3
+ 1001               		.cfi_offset 12, -2
+ 1002 044a DF92      		push r13
+ 1003               	.LCFI24:
+ 1004               		.cfi_def_cfa_offset 4
+ 1005               		.cfi_offset 13, -3
+ 1006 044c FF92      		push r15
+ 1007               	.LCFI25:
+ 1008               		.cfi_def_cfa_offset 5
+ 1009               		.cfi_offset 15, -4
+ 1010 044e 0F93      		push r16
+ 1011               	.LCFI26:
+ 1012               		.cfi_def_cfa_offset 6
+ 1013               		.cfi_offset 16, -5
+ 1014 0450 1F93      		push r17
+ 1015               	.LCFI27:
+ 1016               		.cfi_def_cfa_offset 7
+ 1017               		.cfi_offset 17, -6
+ 1018 0452 CF93      		push r28
+ 1019               	.LCFI28:
+ 1020               		.cfi_def_cfa_offset 8
+ 1021               		.cfi_offset 28, -7
+ 1022 0454 DF93      		push r29
+ 1023               	.LCFI29:
+ 1024               		.cfi_def_cfa_offset 9
+ 1025               		.cfi_offset 29, -8
+ 1026 0456 00D0      		rcall .
+ 1027               	.LCFI30:
+ 1028               		.cfi_def_cfa_offset 11
+ 1029 0458 CDB7      		in r28,__SP_L__
+ 1030 045a DEB7      		in r29,__SP_H__
+ 1031               	.LCFI31:
+ 1032               		.cfi_def_cfa_register 28
+ 1033               	/* prologue: function */
+ 1034               	/* frame size = 2 */
+ 1035               	/* stack size = 9 */
+ 1036               	.L__stack_usage = 9
+ 1037 045c F82E      		mov r15,r24
+ 1038               	.LVL93:
+ 242:font.c        ****     uint8_t count = 0;                  // Length of string in chars
+ 1039               		.loc 1 242 0
+ 1040 045e 00E0      		ldi r16,0
+ 241:font.c        ****     uint8_t length = 0;                 // Length of string in pixels
+ 1041               		.loc 1 241 0
+ 1042 0460 10E0      		ldi r17,0
+ 1043               	.LVL94:
+ 1044               	.L65:
+ 247:font.c        ****     while ((txt = serial_peek(count)) != 0xff)
+ 1045               		.loc 1 247 0 discriminator 1
+ 1046 0462 802F      		mov r24,r16
+ 1047 0464 90E0      		ldi r25,0
+ 1048 0466 4A83      		std Y+2,r20
+ 1049 0468 6983      		std Y+1,r22
+ 1050 046a 0E94 0000 		call serial_peek
+ 1051               	.LVL95:
+ 1052 046e 982F      		mov r25,r24
+ 1053               	.LVL96:
+ 1054 0470 4A81      		ldd r20,Y+2
+ 1055 0472 6981      		ldd r22,Y+1
+ 1056 0474 8F3F      		cpi r24,lo8(-1)
+ 1057 0476 01F4      		brne .+2
+ 1058 0478 00C0      		rjmp .L85
+ 1059               	.LBB18:
+ 253:font.c        ****         if ((txt < font_first_char) || (txt > font_last_char))
+ 1060               		.loc 1 253 0
+ 1061 047a 2091 0000 		lds r18,font_first_char
+ 1062 047e 9217      		cp r25,r18
+ 1063 0480 00F0      		brlo .L75
+ 253:font.c        ****         if ((txt < font_first_char) || (txt > font_last_char))
+ 1064               		.loc 1 253 0 is_stmt 0 discriminator 1
+ 1065 0482 8091 0000 		lds r24,font_last_char
+ 1066               	.LVL97:
+ 1067 0486 8917      		cp r24,r25
+ 1068 0488 00F4      		brsh .L66
+ 1069               	.L75:
+ 1070 048a 922F      		mov r25,r18
+ 1071               	.LVL98:
+ 1072               	.L66:
+ 259:font.c        ****         offset = (txt - font_first_char) * font_bytes + FONT_FILE_HEADER_LEN;
+ 1073               		.loc 1 259 0 is_stmt 1
+ 1074 048c A091 0000 		lds r26,font_bytes
+ 1075 0490 E92F      		mov r30,r25
+ 1076 0492 F0E0      		ldi r31,0
+ 1077 0494 E21B      		sub r30,r18
+ 1078 0496 F109      		sbc r31,__zero_reg__
+ 1079 0498 B0E0      		ldi r27,0
+ 1080 049a EA9F      		mul r30,r26
+ 1081 049c 9001      		movw r18,r0
+ 1082 049e EB9F      		mul r30,r27
+ 1083 04a0 300D      		add r19,r0
+ 1084 04a2 FA9F      		mul r31,r26
+ 1085 04a4 300D      		add r19,r0
+ 1086 04a6 1124      		clr r1
+ 1087               	.LVL99:
+ 1088               	.LBB19:
+ 1089               	.LBB20:
+ 264:font.c        ****             uint8_t cc = pgm_read_byte (&font_ptr[ii]);
+ 1090               		.loc 1 264 0
+ 1091 04a8 C090 0000 		lds r12,font_ptr
+ 1092 04ac D090 0000 		lds r13,font_ptr+1
+ 1093               	.LBE20:
+ 269:font.c        ****             if ((cc != 0) || (txt == 0x20) || ((font_draw_mode & MODE_PROP_FONT) == 0) || (font_h >
+ 1094               		.loc 1 269 0
+ 1095 04b0 5091 0000 		lds r21,font_draw_mode
+ 1096 04b4 5072      		andi r21,lo8(32)
+ 1097 04b6 8091 0000 		lds r24,font_h
+ 1098               	.LBE19:
+ 262:font.c        ****         for (ii = offset; ii < offset + font_bytes; ii++)
+ 1099               		.loc 1 262 0
+ 1100 04ba 2B5F      		subi r18,-5
+ 1101 04bc 3F4F      		sbci r19,-1
+ 1102               	.LVL100:
+ 1103 04be A20F      		add r26,r18
+ 1104 04c0 B31F      		adc r27,r19
+ 1105               	.LVL101:
+ 1106               	.L67:
+ 262:font.c        ****         for (ii = offset; ii < offset + font_bytes; ii++)
+ 1107               		.loc 1 262 0 is_stmt 0 discriminator 1
+ 1108 04c2 2A17      		cp r18,r26
+ 1109 04c4 3B07      		cpc r19,r27
+ 1110 04c6 00F4      		brsh .L86
+ 1111               	.LVL102:
+ 1112 04c8 F601      		movw r30,r12
+ 1113 04ca E20F      		add r30,r18
+ 1114 04cc F31F      		adc r31,r19
+ 1115               	.LVL103:
+ 1116               	.LBB22:
+ 1117               	.LBB21:
+ 264:font.c        ****             uint8_t cc = pgm_read_byte (&font_ptr[ii]);
+ 1118               		.loc 1 264 0 is_stmt 1
+ 1119               	/* #APP */
+ 1120               	 ;  264 "font.c" 1
+ 1121 04ce E491      		lpm r30, Z
+ 1122               		
+ 1123               	 ;  0 "" 2
+ 1124               	.LVL104:
+ 1125               	/* #NOAPP */
+ 1126               	.LBE21:
+ 269:font.c        ****             if ((cc != 0) || (txt == 0x20) || ((font_draw_mode & MODE_PROP_FONT) == 0) || (font_h >
+ 1127               		.loc 1 269 0
+ 1128 04d0 E111      		cpse r30,__zero_reg__
+ 1129 04d2 00C0      		rjmp .L68
+ 269:font.c        ****             if ((cc != 0) || (txt == 0x20) || ((font_draw_mode & MODE_PROP_FONT) == 0) || (font_h >
+ 1130               		.loc 1 269 0 is_stmt 0 discriminator 1
+ 1131 04d4 9032      		cpi r25,lo8(32)
+ 1132 04d6 01F0      		breq .L68
+ 1133 04d8 5523      		tst r21
+ 1134 04da 01F0      		breq .L68
+ 1135 04dc 8930      		cpi r24,lo8(9)
+ 1136 04de 00F0      		brlo .L69
+ 1137               	.L68:
+ 271:font.c        ****                 length++;
+ 1138               		.loc 1 271 0 is_stmt 1
+ 1139 04e0 1F5F      		subi r17,lo8(-(1))
+ 1140               	.LVL105:
+ 1141               	.L69:
+ 1142               	.LBE22:
+ 262:font.c        ****         for (ii = offset; ii < offset + font_bytes; ii++)
+ 1143               		.loc 1 262 0
+ 1144 04e2 2F5F      		subi r18,-1
+ 1145 04e4 3F4F      		sbci r19,-1
+ 1146               	.LVL106:
+ 1147 04e6 00C0      		rjmp .L67
+ 1148               	.LVL107:
+ 1149               	.L86:
+ 276:font.c        ****         if (count > 0)
+ 1150               		.loc 1 276 0
+ 1151 04e8 0023      		tst r16
+ 1152 04ea 01F0      		breq .L71
+ 277:font.c        ****             length += font_space;
+ 1153               		.loc 1 277 0
+ 1154 04ec 8091 0000 		lds r24,font_space
+ 1155 04f0 180F      		add r17,r24
+ 1156               	.LVL108:
+ 1157               	.L71:
+ 280:font.c        ****         count++;
+ 1158               		.loc 1 280 0
+ 1159 04f2 0F5F      		subi r16,lo8(-(1))
+ 1160               	.LVL109:
+ 1161 04f4 00C0      		rjmp .L65
+ 1162               	.LVL110:
+ 1163               	.L85:
+ 1164               	.LBE18:
+ 285:font.c        ****     if (justification == FONT_ALIGN_CENTER)
+ 1165               		.loc 1 285 0
+ 1166 04f6 4111      		cpse r20,__zero_reg__
+ 1167 04f8 00C0      		rjmp .L73
+ 286:font.c        ****         length = (length + 1) >> 1;     // Divide by 2
+ 1168               		.loc 1 286 0
+ 1169 04fa 212F      		mov r18,r17
+ 1170 04fc 30E0      		ldi r19,0
+ 1171 04fe 2F5F      		subi r18,-1
+ 1172 0500 3F4F      		sbci r19,-1
+ 1173 0502 3595      		asr r19
+ 1174 0504 2795      		ror r18
+ 1175 0506 122F      		mov r17,r18
+ 1176               	.LVL111:
+ 1177               	.L73:
+ 290:font.c        ****     font_position (x, y, 0);
+ 1178               		.loc 1 290 0
+ 1179 0508 40E0      		ldi r20,0
+ 1180 050a 8F2D      		mov r24,r15
+ 1181               	.LVL112:
+ 1182 050c 811B      		sub r24,r17
+ 1183               	.LVL113:
+ 1184 050e 0E94 0000 		call font_position
+ 1185               	.LVL114:
+ 293:font.c        ****     prefs_graphics = 0;
+ 1186               		.loc 1 293 0
+ 1187 0512 1092 0000 		sts prefs+12,__zero_reg__
+ 1188               	/* epilogue start */
+ 294:font.c        **** }
+ 1189               		.loc 1 294 0
+ 1190 0516 0F90      		pop __tmp_reg__
+ 1191 0518 0F90      		pop __tmp_reg__
+ 1192 051a DF91      		pop r29
+ 1193 051c CF91      		pop r28
+ 1194 051e 1F91      		pop r17
+ 1195               	.LVL115:
+ 1196 0520 0F91      		pop r16
+ 1197               	.LVL116:
+ 1198 0522 FF90      		pop r15
+ 1199 0524 DF90      		pop r13
+ 1200 0526 CF90      		pop r12
+ 1201 0528 0895      		ret
+ 1202               		.cfi_endproc
+ 1203               	.LFE17:
+ 1205               		.section	.progmem.data,"a",@progbits
+ 1208               	on.2379:
+ 1209 0000 6F6E 00   		.string	"on"
+ 1212               	off.2380:
+ 1213 0003 6F66 6600 		.string	"off"
+ 1214               		.local	font_start_xpos
+ 1215               		.comm	font_start_xpos,1,1
+ 1216               		.local	font_ypos
+ 1217               		.comm	font_ypos,1,1
+ 1218               		.local	font_xpos
+ 1219               		.comm	font_xpos,1,1
+ 1220               		.local	font_ptr
+ 1221               		.comm	font_ptr,2,1
+ 1222               		.local	font_last_char
+ 1223               		.comm	font_last_char,1,1
+ 1224               		.local	font_first_char
+ 1225               		.comm	font_first_char,1,1
+ 1226               		.local	font_space
+ 1227               		.comm	font_space,1,1
+ 1228               		.local	font_h
+ 1229               		.comm	font_h,1,1
+ 1230               		.local	font_ws
+ 1231               		.comm	font_ws,1,1
+ 1232               		.local	font_w
+ 1233               		.comm	font_w,1,1
+ 1234               		.local	font_bytes
+ 1235               		.comm	font_bytes,1,1
+ 1236               		.local	y_pos
+ 1237               		.comm	y_pos,1,1
+ 1238               		.local	x_pos
+ 1239               		.comm	x_pos,1,1
+ 1240               		.local	font_draw_mode
+ 1241               		.comm	font_draw_mode,1,1
+ 1244               	tom_thumb_3x6:
+ 1245 0007 03        		.byte	3
+ 1246 0008 06        		.byte	6
+ 1247 0009 01        		.byte	1
+ 1248 000a 20        		.byte	32
+ 1249 000b 7F        		.byte	127
+ 1250 000c 00        		.byte	0
+ 1251 000d 00        		.byte	0
+ 1252 000e 00        		.byte	0
+ 1253 000f 00        		.byte	0
+ 1254 0010 17        		.byte	23
+ 1255 0011 00        		.byte	0
+ 1256 0012 03        		.byte	3
+ 1257 0013 00        		.byte	0
+ 1258 0014 03        		.byte	3
+ 1259 0015 1F        		.byte	31
+ 1260 0016 0A        		.byte	10
+ 1261 0017 1F        		.byte	31
+ 1262 0018 0A        		.byte	10
+ 1263 0019 1F        		.byte	31
+ 1264 001a 05        		.byte	5
+ 1265 001b 09        		.byte	9
+ 1266 001c 04        		.byte	4
+ 1267 001d 12        		.byte	18
+ 1268 001e 0F        		.byte	15
+ 1269 001f 17        		.byte	23
+ 1270 0020 1C        		.byte	28
+ 1271 0021 00        		.byte	0
+ 1272 0022 03        		.byte	3
+ 1273 0023 00        		.byte	0
+ 1274 0024 00        		.byte	0
+ 1275 0025 0E        		.byte	14
+ 1276 0026 11        		.byte	17
+ 1277 0027 11        		.byte	17
+ 1278 0028 0E        		.byte	14
+ 1279 0029 00        		.byte	0
+ 1280 002a 0A        		.byte	10
+ 1281 002b 04        		.byte	4
+ 1282 002c 0A        		.byte	10
+ 1283 002d 04        		.byte	4
+ 1284 002e 0E        		.byte	14
+ 1285 002f 04        		.byte	4
+ 1286 0030 10        		.byte	16
+ 1287 0031 08        		.byte	8
+ 1288 0032 00        		.byte	0
+ 1289 0033 04        		.byte	4
+ 1290 0034 04        		.byte	4
+ 1291 0035 04        		.byte	4
+ 1292 0036 00        		.byte	0
+ 1293 0037 10        		.byte	16
+ 1294 0038 00        		.byte	0
+ 1295 0039 18        		.byte	24
+ 1296 003a 04        		.byte	4
+ 1297 003b 03        		.byte	3
+ 1298 003c 1E        		.byte	30
+ 1299 003d 11        		.byte	17
+ 1300 003e 0F        		.byte	15
+ 1301 003f 02        		.byte	2
+ 1302 0040 1F        		.byte	31
+ 1303 0041 00        		.byte	0
+ 1304 0042 19        		.byte	25
+ 1305 0043 15        		.byte	21
+ 1306 0044 12        		.byte	18
+ 1307 0045 11        		.byte	17
+ 1308 0046 15        		.byte	21
+ 1309 0047 0A        		.byte	10
+ 1310 0048 07        		.byte	7
+ 1311 0049 04        		.byte	4
+ 1312 004a 1F        		.byte	31
+ 1313 004b 17        		.byte	23
+ 1314 004c 15        		.byte	21
+ 1315 004d 09        		.byte	9
+ 1316 004e 1E        		.byte	30
+ 1317 004f 15        		.byte	21
+ 1318 0050 1D        		.byte	29
+ 1319 0051 19        		.byte	25
+ 1320 0052 05        		.byte	5
+ 1321 0053 03        		.byte	3
+ 1322 0054 1F        		.byte	31
+ 1323 0055 15        		.byte	21
+ 1324 0056 1F        		.byte	31
+ 1325 0057 17        		.byte	23
+ 1326 0058 15        		.byte	21
+ 1327 0059 0F        		.byte	15
+ 1328 005a 00        		.byte	0
+ 1329 005b 0A        		.byte	10
+ 1330 005c 00        		.byte	0
+ 1331 005d 10        		.byte	16
+ 1332 005e 0A        		.byte	10
+ 1333 005f 00        		.byte	0
+ 1334 0060 04        		.byte	4
+ 1335 0061 0A        		.byte	10
+ 1336 0062 11        		.byte	17
+ 1337 0063 0A        		.byte	10
+ 1338 0064 0A        		.byte	10
+ 1339 0065 0A        		.byte	10
+ 1340 0066 11        		.byte	17
+ 1341 0067 0A        		.byte	10
+ 1342 0068 04        		.byte	4
+ 1343 0069 01        		.byte	1
+ 1344 006a 15        		.byte	21
+ 1345 006b 03        		.byte	3
+ 1346 006c 0E        		.byte	14
+ 1347 006d 15        		.byte	21
+ 1348 006e 16        		.byte	22
+ 1349 006f 1E        		.byte	30
+ 1350 0070 05        		.byte	5
+ 1351 0071 1E        		.byte	30
+ 1352 0072 1F        		.byte	31
+ 1353 0073 15        		.byte	21
+ 1354 0074 0A        		.byte	10
+ 1355 0075 0E        		.byte	14
+ 1356 0076 11        		.byte	17
+ 1357 0077 11        		.byte	17
+ 1358 0078 1F        		.byte	31
+ 1359 0079 11        		.byte	17
+ 1360 007a 0E        		.byte	14
+ 1361 007b 1F        		.byte	31
+ 1362 007c 15        		.byte	21
+ 1363 007d 15        		.byte	21
+ 1364 007e 1F        		.byte	31
+ 1365 007f 05        		.byte	5
+ 1366 0080 05        		.byte	5
+ 1367 0081 0E        		.byte	14
+ 1368 0082 15        		.byte	21
+ 1369 0083 1D        		.byte	29
+ 1370 0084 1F        		.byte	31
+ 1371 0085 04        		.byte	4
+ 1372 0086 1F        		.byte	31
+ 1373 0087 11        		.byte	17
+ 1374 0088 1F        		.byte	31
+ 1375 0089 11        		.byte	17
+ 1376 008a 08        		.byte	8
+ 1377 008b 10        		.byte	16
+ 1378 008c 0F        		.byte	15
+ 1379 008d 1F        		.byte	31
+ 1380 008e 04        		.byte	4
+ 1381 008f 1B        		.byte	27
+ 1382 0090 1F        		.byte	31
+ 1383 0091 10        		.byte	16
+ 1384 0092 10        		.byte	16
+ 1385 0093 1F        		.byte	31
+ 1386 0094 06        		.byte	6
+ 1387 0095 1F        		.byte	31
+ 1388 0096 1F        		.byte	31
+ 1389 0097 0E        		.byte	14
+ 1390 0098 1F        		.byte	31
+ 1391 0099 0E        		.byte	14
+ 1392 009a 11        		.byte	17
+ 1393 009b 0E        		.byte	14
+ 1394 009c 1F        		.byte	31
+ 1395 009d 05        		.byte	5
+ 1396 009e 02        		.byte	2
+ 1397 009f 0E        		.byte	14
+ 1398 00a0 19        		.byte	25
+ 1399 00a1 1E        		.byte	30
+ 1400 00a2 1F        		.byte	31
+ 1401 00a3 0D        		.byte	13
+ 1402 00a4 16        		.byte	22
+ 1403 00a5 12        		.byte	18
+ 1404 00a6 15        		.byte	21
+ 1405 00a7 09        		.byte	9
+ 1406 00a8 01        		.byte	1
+ 1407 00a9 1F        		.byte	31
+ 1408 00aa 01        		.byte	1
+ 1409 00ab 0F        		.byte	15
+ 1410 00ac 10        		.byte	16
+ 1411 00ad 1F        		.byte	31
+ 1412 00ae 07        		.byte	7
+ 1413 00af 18        		.byte	24
+ 1414 00b0 07        		.byte	7
+ 1415 00b1 1F        		.byte	31
+ 1416 00b2 0C        		.byte	12
+ 1417 00b3 1F        		.byte	31
+ 1418 00b4 1B        		.byte	27
+ 1419 00b5 04        		.byte	4
+ 1420 00b6 1B        		.byte	27
+ 1421 00b7 03        		.byte	3
+ 1422 00b8 1C        		.byte	28
+ 1423 00b9 03        		.byte	3
+ 1424 00ba 19        		.byte	25
+ 1425 00bb 15        		.byte	21
+ 1426 00bc 13        		.byte	19
+ 1427 00bd 1F        		.byte	31
+ 1428 00be 11        		.byte	17
+ 1429 00bf 11        		.byte	17
+ 1430 00c0 02        		.byte	2
+ 1431 00c1 04        		.byte	4
+ 1432 00c2 08        		.byte	8
+ 1433 00c3 11        		.byte	17
+ 1434 00c4 11        		.byte	17
+ 1435 00c5 1F        		.byte	31
+ 1436 00c6 02        		.byte	2
+ 1437 00c7 01        		.byte	1
+ 1438 00c8 02        		.byte	2
+ 1439 00c9 10        		.byte	16
+ 1440 00ca 10        		.byte	16
+ 1441 00cb 10        		.byte	16
+ 1442 00cc 00        		.byte	0
+ 1443 00cd 01        		.byte	1
+ 1444 00ce 02        		.byte	2
+ 1445 00cf 1A        		.byte	26
+ 1446 00d0 16        		.byte	22
+ 1447 00d1 1C        		.byte	28
+ 1448 00d2 1F        		.byte	31
+ 1449 00d3 12        		.byte	18
+ 1450 00d4 0C        		.byte	12
+ 1451 00d5 0C        		.byte	12
+ 1452 00d6 12        		.byte	18
+ 1453 00d7 12        		.byte	18
+ 1454 00d8 0C        		.byte	12
+ 1455 00d9 12        		.byte	18
+ 1456 00da 1F        		.byte	31
+ 1457 00db 0C        		.byte	12
+ 1458 00dc 1A        		.byte	26
+ 1459 00dd 16        		.byte	22
+ 1460 00de 04        		.byte	4
+ 1461 00df 1E        		.byte	30
+ 1462 00e0 05        		.byte	5
+ 1463 00e1 0C        		.byte	12
+ 1464 00e2 2A        		.byte	42
+ 1465 00e3 1E        		.byte	30
+ 1466 00e4 1F        		.byte	31
+ 1467 00e5 02        		.byte	2
+ 1468 00e6 1C        		.byte	28
+ 1469 00e7 00        		.byte	0
+ 1470 00e8 1D        		.byte	29
+ 1471 00e9 00        		.byte	0
+ 1472 00ea 10        		.byte	16
+ 1473 00eb 20        		.byte	32
+ 1474 00ec 1D        		.byte	29
+ 1475 00ed 1F        		.byte	31
+ 1476 00ee 0C        		.byte	12
+ 1477 00ef 12        		.byte	18
+ 1478 00f0 11        		.byte	17
+ 1479 00f1 1F        		.byte	31
+ 1480 00f2 10        		.byte	16
+ 1481 00f3 1E        		.byte	30
+ 1482 00f4 0E        		.byte	14
+ 1483 00f5 1E        		.byte	30
+ 1484 00f6 1E        		.byte	30
+ 1485 00f7 02        		.byte	2
+ 1486 00f8 1C        		.byte	28
+ 1487 00f9 0C        		.byte	12
+ 1488 00fa 12        		.byte	18
+ 1489 00fb 0C        		.byte	12
+ 1490 00fc 3E        		.byte	62
+ 1491 00fd 12        		.byte	18
+ 1492 00fe 0C        		.byte	12
+ 1493 00ff 0C        		.byte	12
+ 1494 0100 12        		.byte	18
+ 1495 0101 3E        		.byte	62
+ 1496 0102 1C        		.byte	28
+ 1497 0103 02        		.byte	2
+ 1498 0104 02        		.byte	2
+ 1499 0105 14        		.byte	20
+ 1500 0106 1E        		.byte	30
+ 1501 0107 0A        		.byte	10
+ 1502 0108 02        		.byte	2
+ 1503 0109 1F        		.byte	31
+ 1504 010a 12        		.byte	18
+ 1505 010b 0E        		.byte	14
+ 1506 010c 10        		.byte	16
+ 1507 010d 1E        		.byte	30
+ 1508 010e 0E        		.byte	14
+ 1509 010f 18        		.byte	24
+ 1510 0110 0E        		.byte	14
+ 1511 0111 1E        		.byte	30
+ 1512 0112 1C        		.byte	28
+ 1513 0113 1E        		.byte	30
+ 1514 0114 12        		.byte	18
+ 1515 0115 0C        		.byte	12
+ 1516 0116 12        		.byte	18
+ 1517 0117 06        		.byte	6
+ 1518 0118 28        		.byte	40
+ 1519 0119 1E        		.byte	30
+ 1520 011a 1A        		.byte	26
+ 1521 011b 1E        		.byte	30
+ 1522 011c 16        		.byte	22
+ 1523 011d 04        		.byte	4
+ 1524 011e 1B        		.byte	27
+ 1525 011f 11        		.byte	17
+ 1526 0120 00        		.byte	0
+ 1527 0121 1B        		.byte	27
+ 1528 0122 00        		.byte	0
+ 1529 0123 11        		.byte	17
+ 1530 0124 1B        		.byte	27
+ 1531 0125 04        		.byte	4
+ 1532 0126 02        		.byte	2
+ 1533 0127 03        		.byte	3
+ 1534 0128 01        		.byte	1
+ 1537               	font_alt_5x8:
+ 1538 0129 05        		.byte	5
+ 1539 012a 08        		.byte	8
+ 1540 012b 01        		.byte	1
+ 1541 012c 20        		.byte	32
+ 1542 012d 7F        		.byte	127
+ 1543 012e 00        		.byte	0
+ 1544 012f 00        		.byte	0
+ 1545 0130 00        		.byte	0
+ 1546 0131 00        		.byte	0
+ 1547 0132 00        		.byte	0
+ 1548 0133 00        		.byte	0
+ 1549 0134 00        		.byte	0
+ 1550 0135 5F        		.byte	95
+ 1551 0136 00        		.byte	0
+ 1552 0137 00        		.byte	0
+ 1553 0138 00        		.byte	0
+ 1554 0139 07        		.byte	7
+ 1555 013a 00        		.byte	0
+ 1556 013b 07        		.byte	7
+ 1557 013c 00        		.byte	0
+ 1558 013d 14        		.byte	20
+ 1559 013e 7F        		.byte	127
+ 1560 013f 14        		.byte	20
+ 1561 0140 7F        		.byte	127
+ 1562 0141 14        		.byte	20
+ 1563 0142 24        		.byte	36
+ 1564 0143 2A        		.byte	42
+ 1565 0144 7F        		.byte	127
+ 1566 0145 2A        		.byte	42
+ 1567 0146 12        		.byte	18
+ 1568 0147 23        		.byte	35
+ 1569 0148 13        		.byte	19
+ 1570 0149 08        		.byte	8
+ 1571 014a 64        		.byte	100
+ 1572 014b 62        		.byte	98
+ 1573 014c 36        		.byte	54
+ 1574 014d 49        		.byte	73
+ 1575 014e 55        		.byte	85
+ 1576 014f 22        		.byte	34
+ 1577 0150 50        		.byte	80
+ 1578 0151 00        		.byte	0
+ 1579 0152 00        		.byte	0
+ 1580 0153 03        		.byte	3
+ 1581 0154 00        		.byte	0
+ 1582 0155 00        		.byte	0
+ 1583 0156 00        		.byte	0
+ 1584 0157 1C        		.byte	28
+ 1585 0158 22        		.byte	34
+ 1586 0159 41        		.byte	65
+ 1587 015a 00        		.byte	0
+ 1588 015b 00        		.byte	0
+ 1589 015c 41        		.byte	65
+ 1590 015d 22        		.byte	34
+ 1591 015e 1C        		.byte	28
+ 1592 015f 00        		.byte	0
+ 1593 0160 14        		.byte	20
+ 1594 0161 08        		.byte	8
+ 1595 0162 3E        		.byte	62
+ 1596 0163 08        		.byte	8
+ 1597 0164 14        		.byte	20
+ 1598 0165 08        		.byte	8
+ 1599 0166 08        		.byte	8
+ 1600 0167 3E        		.byte	62
+ 1601 0168 08        		.byte	8
+ 1602 0169 08        		.byte	8
+ 1603 016a 00        		.byte	0
+ 1604 016b 00        		.byte	0
+ 1605 016c A0        		.byte	-96
+ 1606 016d 60        		.byte	96
+ 1607 016e 00        		.byte	0
+ 1608 016f 08        		.byte	8
+ 1609 0170 08        		.byte	8
+ 1610 0171 08        		.byte	8
+ 1611 0172 08        		.byte	8
+ 1612 0173 08        		.byte	8
+ 1613 0174 00        		.byte	0
+ 1614 0175 00        		.byte	0
+ 1615 0176 60        		.byte	96
+ 1616 0177 60        		.byte	96
+ 1617 0178 00        		.byte	0
+ 1618 0179 20        		.byte	32
+ 1619 017a 10        		.byte	16
+ 1620 017b 08        		.byte	8
+ 1621 017c 04        		.byte	4
+ 1622 017d 02        		.byte	2
+ 1623 017e 3E        		.byte	62
+ 1624 017f 51        		.byte	81
+ 1625 0180 49        		.byte	73
+ 1626 0181 45        		.byte	69
+ 1627 0182 3E        		.byte	62
+ 1628 0183 00        		.byte	0
+ 1629 0184 42        		.byte	66
+ 1630 0185 7F        		.byte	127
+ 1631 0186 40        		.byte	64
+ 1632 0187 00        		.byte	0
+ 1633 0188 42        		.byte	66
+ 1634 0189 61        		.byte	97
+ 1635 018a 51        		.byte	81
+ 1636 018b 49        		.byte	73
+ 1637 018c 46        		.byte	70
+ 1638 018d 21        		.byte	33
+ 1639 018e 41        		.byte	65
+ 1640 018f 45        		.byte	69
+ 1641 0190 4B        		.byte	75
+ 1642 0191 31        		.byte	49
+ 1643 0192 18        		.byte	24
+ 1644 0193 14        		.byte	20
+ 1645 0194 12        		.byte	18
+ 1646 0195 7F        		.byte	127
+ 1647 0196 10        		.byte	16
+ 1648 0197 27        		.byte	39
+ 1649 0198 45        		.byte	69
+ 1650 0199 45        		.byte	69
+ 1651 019a 45        		.byte	69
+ 1652 019b 39        		.byte	57
+ 1653 019c 3C        		.byte	60
+ 1654 019d 4A        		.byte	74
+ 1655 019e 49        		.byte	73
+ 1656 019f 49        		.byte	73
+ 1657 01a0 30        		.byte	48
+ 1658 01a1 03        		.byte	3
+ 1659 01a2 71        		.byte	113
+ 1660 01a3 09        		.byte	9
+ 1661 01a4 05        		.byte	5
+ 1662 01a5 03        		.byte	3
+ 1663 01a6 36        		.byte	54
+ 1664 01a7 49        		.byte	73
+ 1665 01a8 49        		.byte	73
+ 1666 01a9 49        		.byte	73
+ 1667 01aa 36        		.byte	54
+ 1668 01ab 06        		.byte	6
+ 1669 01ac 49        		.byte	73
+ 1670 01ad 49        		.byte	73
+ 1671 01ae 29        		.byte	41
+ 1672 01af 1E        		.byte	30
+ 1673 01b0 00        		.byte	0
+ 1674 01b1 00        		.byte	0
+ 1675 01b2 6C        		.byte	108
+ 1676 01b3 6C        		.byte	108
+ 1677 01b4 00        		.byte	0
+ 1678 01b5 00        		.byte	0
+ 1679 01b6 00        		.byte	0
+ 1680 01b7 AC        		.byte	-84
+ 1681 01b8 6C        		.byte	108
+ 1682 01b9 00        		.byte	0
+ 1683 01ba 08        		.byte	8
+ 1684 01bb 14        		.byte	20
+ 1685 01bc 22        		.byte	34
+ 1686 01bd 41        		.byte	65
+ 1687 01be 00        		.byte	0
+ 1688 01bf 28        		.byte	40
+ 1689 01c0 28        		.byte	40
+ 1690 01c1 28        		.byte	40
+ 1691 01c2 28        		.byte	40
+ 1692 01c3 28        		.byte	40
+ 1693 01c4 00        		.byte	0
+ 1694 01c5 41        		.byte	65
+ 1695 01c6 22        		.byte	34
+ 1696 01c7 14        		.byte	20
+ 1697 01c8 08        		.byte	8
+ 1698 01c9 02        		.byte	2
+ 1699 01ca 01        		.byte	1
+ 1700 01cb 51        		.byte	81
+ 1701 01cc 09        		.byte	9
+ 1702 01cd 06        		.byte	6
+ 1703 01ce 32        		.byte	50
+ 1704 01cf 49        		.byte	73
+ 1705 01d0 79        		.byte	121
+ 1706 01d1 41        		.byte	65
+ 1707 01d2 3E        		.byte	62
+ 1708 01d3 7E        		.byte	126
+ 1709 01d4 11        		.byte	17
+ 1710 01d5 11        		.byte	17
+ 1711 01d6 11        		.byte	17
+ 1712 01d7 7E        		.byte	126
+ 1713 01d8 7F        		.byte	127
+ 1714 01d9 49        		.byte	73
+ 1715 01da 49        		.byte	73
+ 1716 01db 49        		.byte	73
+ 1717 01dc 36        		.byte	54
+ 1718 01dd 3E        		.byte	62
+ 1719 01de 41        		.byte	65
+ 1720 01df 41        		.byte	65
+ 1721 01e0 41        		.byte	65
+ 1722 01e1 22        		.byte	34
+ 1723 01e2 7F        		.byte	127
+ 1724 01e3 41        		.byte	65
+ 1725 01e4 41        		.byte	65
+ 1726 01e5 41        		.byte	65
+ 1727 01e6 3E        		.byte	62
+ 1728 01e7 7F        		.byte	127
+ 1729 01e8 49        		.byte	73
+ 1730 01e9 49        		.byte	73
+ 1731 01ea 49        		.byte	73
+ 1732 01eb 41        		.byte	65
+ 1733 01ec 7F        		.byte	127
+ 1734 01ed 09        		.byte	9
+ 1735 01ee 09        		.byte	9
+ 1736 01ef 09        		.byte	9
+ 1737 01f0 01        		.byte	1
+ 1738 01f1 3E        		.byte	62
+ 1739 01f2 41        		.byte	65
+ 1740 01f3 41        		.byte	65
+ 1741 01f4 49        		.byte	73
+ 1742 01f5 72        		.byte	114
+ 1743 01f6 7F        		.byte	127
+ 1744 01f7 08        		.byte	8
+ 1745 01f8 08        		.byte	8
+ 1746 01f9 08        		.byte	8
+ 1747 01fa 7F        		.byte	127
+ 1748 01fb 00        		.byte	0
+ 1749 01fc 41        		.byte	65
+ 1750 01fd 7F        		.byte	127
+ 1751 01fe 41        		.byte	65
+ 1752 01ff 00        		.byte	0
+ 1753 0200 20        		.byte	32
+ 1754 0201 40        		.byte	64
+ 1755 0202 41        		.byte	65
+ 1756 0203 3F        		.byte	63
+ 1757 0204 01        		.byte	1
+ 1758 0205 7F        		.byte	127
+ 1759 0206 08        		.byte	8
+ 1760 0207 14        		.byte	20
+ 1761 0208 22        		.byte	34
+ 1762 0209 41        		.byte	65
+ 1763 020a 7F        		.byte	127
+ 1764 020b 40        		.byte	64
+ 1765 020c 40        		.byte	64
+ 1766 020d 40        		.byte	64
+ 1767 020e 40        		.byte	64
+ 1768 020f 7F        		.byte	127
+ 1769 0210 02        		.byte	2
+ 1770 0211 0C        		.byte	12
+ 1771 0212 02        		.byte	2
+ 1772 0213 7F        		.byte	127
+ 1773 0214 7F        		.byte	127
+ 1774 0215 04        		.byte	4
+ 1775 0216 08        		.byte	8
+ 1776 0217 10        		.byte	16
+ 1777 0218 7F        		.byte	127
+ 1778 0219 3E        		.byte	62
+ 1779 021a 41        		.byte	65
+ 1780 021b 41        		.byte	65
+ 1781 021c 41        		.byte	65
+ 1782 021d 3E        		.byte	62
+ 1783 021e 7F        		.byte	127
+ 1784 021f 09        		.byte	9
+ 1785 0220 09        		.byte	9
+ 1786 0221 09        		.byte	9
+ 1787 0222 06        		.byte	6
+ 1788 0223 3E        		.byte	62
+ 1789 0224 41        		.byte	65
+ 1790 0225 51        		.byte	81
+ 1791 0226 21        		.byte	33
+ 1792 0227 5E        		.byte	94
+ 1793 0228 7F        		.byte	127
+ 1794 0229 09        		.byte	9
+ 1795 022a 19        		.byte	25
+ 1796 022b 29        		.byte	41
+ 1797 022c 46        		.byte	70
+ 1798 022d 26        		.byte	38
+ 1799 022e 49        		.byte	73
+ 1800 022f 49        		.byte	73
+ 1801 0230 49        		.byte	73
+ 1802 0231 32        		.byte	50
+ 1803 0232 01        		.byte	1
+ 1804 0233 01        		.byte	1
+ 1805 0234 7F        		.byte	127
+ 1806 0235 01        		.byte	1
+ 1807 0236 01        		.byte	1
+ 1808 0237 3F        		.byte	63
+ 1809 0238 40        		.byte	64
+ 1810 0239 40        		.byte	64
+ 1811 023a 40        		.byte	64
+ 1812 023b 3F        		.byte	63
+ 1813 023c 1F        		.byte	31
+ 1814 023d 20        		.byte	32
+ 1815 023e 40        		.byte	64
+ 1816 023f 20        		.byte	32
+ 1817 0240 1F        		.byte	31
+ 1818 0241 3F        		.byte	63
+ 1819 0242 40        		.byte	64
+ 1820 0243 38        		.byte	56
+ 1821 0244 40        		.byte	64
+ 1822 0245 3F        		.byte	63
+ 1823 0246 63        		.byte	99
+ 1824 0247 14        		.byte	20
+ 1825 0248 08        		.byte	8
+ 1826 0249 14        		.byte	20
+ 1827 024a 63        		.byte	99
+ 1828 024b 07        		.byte	7
+ 1829 024c 08        		.byte	8
+ 1830 024d 70        		.byte	112
+ 1831 024e 08        		.byte	8
+ 1832 024f 07        		.byte	7
+ 1833 0250 61        		.byte	97
+ 1834 0251 51        		.byte	81
+ 1835 0252 49        		.byte	73
+ 1836 0253 45        		.byte	69
+ 1837 0254 43        		.byte	67
+ 1838 0255 00        		.byte	0
+ 1839 0256 7F        		.byte	127
+ 1840 0257 41        		.byte	65
+ 1841 0258 41        		.byte	65
+ 1842 0259 00        		.byte	0
+ 1843 025a 02        		.byte	2
+ 1844 025b 04        		.byte	4
+ 1845 025c 08        		.byte	8
+ 1846 025d 10        		.byte	16
+ 1847 025e 20        		.byte	32
+ 1848 025f 00        		.byte	0
+ 1849 0260 41        		.byte	65
+ 1850 0261 41        		.byte	65
+ 1851 0262 7F        		.byte	127
+ 1852 0263 00        		.byte	0
+ 1853 0264 04        		.byte	4
+ 1854 0265 02        		.byte	2
+ 1855 0266 01        		.byte	1
+ 1856 0267 02        		.byte	2
+ 1857 0268 04        		.byte	4
+ 1858 0269 80        		.byte	-128
+ 1859 026a 80        		.byte	-128
+ 1860 026b 80        		.byte	-128
+ 1861 026c 80        		.byte	-128
+ 1862 026d 80        		.byte	-128
+ 1863 026e 00        		.byte	0
+ 1864 026f 01        		.byte	1
+ 1865 0270 02        		.byte	2
+ 1866 0271 04        		.byte	4
+ 1867 0272 00        		.byte	0
+ 1868 0273 20        		.byte	32
+ 1869 0274 54        		.byte	84
+ 1870 0275 54        		.byte	84
+ 1871 0276 54        		.byte	84
+ 1872 0277 78        		.byte	120
+ 1873 0278 7F        		.byte	127
+ 1874 0279 48        		.byte	72
+ 1875 027a 44        		.byte	68
+ 1876 027b 44        		.byte	68
+ 1877 027c 38        		.byte	56
+ 1878 027d 38        		.byte	56
+ 1879 027e 44        		.byte	68
+ 1880 027f 44        		.byte	68
+ 1881 0280 44        		.byte	68
+ 1882 0281 20        		.byte	32
+ 1883 0282 38        		.byte	56
+ 1884 0283 44        		.byte	68
+ 1885 0284 44        		.byte	68
+ 1886 0285 48        		.byte	72
+ 1887 0286 7F        		.byte	127
+ 1888 0287 38        		.byte	56
+ 1889 0288 54        		.byte	84
+ 1890 0289 54        		.byte	84
+ 1891 028a 54        		.byte	84
+ 1892 028b 18        		.byte	24
+ 1893 028c 08        		.byte	8
+ 1894 028d 7E        		.byte	126
+ 1895 028e 09        		.byte	9
+ 1896 028f 01        		.byte	1
+ 1897 0290 02        		.byte	2
+ 1898 0291 18        		.byte	24
+ 1899 0292 A4        		.byte	-92
+ 1900 0293 A4        		.byte	-92
+ 1901 0294 A4        		.byte	-92
+ 1902 0295 78        		.byte	120
+ 1903 0296 7F        		.byte	127
+ 1904 0297 10        		.byte	16
+ 1905 0298 08        		.byte	8
+ 1906 0299 08        		.byte	8
+ 1907 029a 70        		.byte	112
+ 1908 029b 00        		.byte	0
+ 1909 029c 48        		.byte	72
+ 1910 029d 7A        		.byte	122
+ 1911 029e 40        		.byte	64
+ 1912 029f 00        		.byte	0
+ 1913 02a0 00        		.byte	0
+ 1914 02a1 20        		.byte	32
+ 1915 02a2 40        		.byte	64
+ 1916 02a3 48        		.byte	72
+ 1917 02a4 3A        		.byte	58
+ 1918 02a5 7F        		.byte	127
+ 1919 02a6 10        		.byte	16
+ 1920 02a7 28        		.byte	40
+ 1921 02a8 44        		.byte	68
+ 1922 02a9 00        		.byte	0
+ 1923 02aa 00        		.byte	0
+ 1924 02ab 41        		.byte	65
+ 1925 02ac 7F        		.byte	127
+ 1926 02ad 40        		.byte	64
+ 1927 02ae 00        		.byte	0
+ 1928 02af 7C        		.byte	124
+ 1929 02b0 04        		.byte	4
+ 1930 02b1 38        		.byte	56
+ 1931 02b2 04        		.byte	4
+ 1932 02b3 78        		.byte	120
+ 1933 02b4 7C        		.byte	124
+ 1934 02b5 08        		.byte	8
+ 1935 02b6 04        		.byte	4
+ 1936 02b7 04        		.byte	4
+ 1937 02b8 78        		.byte	120
+ 1938 02b9 38        		.byte	56
+ 1939 02ba 44        		.byte	68
+ 1940 02bb 44        		.byte	68
+ 1941 02bc 44        		.byte	68
+ 1942 02bd 38        		.byte	56
+ 1943 02be 7C        		.byte	124
+ 1944 02bf 14        		.byte	20
+ 1945 02c0 14        		.byte	20
+ 1946 02c1 14        		.byte	20
+ 1947 02c2 08        		.byte	8
+ 1948 02c3 08        		.byte	8
+ 1949 02c4 14        		.byte	20
+ 1950 02c5 14        		.byte	20
+ 1951 02c6 18        		.byte	24
+ 1952 02c7 7C        		.byte	124
+ 1953 02c8 7C        		.byte	124
+ 1954 02c9 08        		.byte	8
+ 1955 02ca 04        		.byte	4
+ 1956 02cb 04        		.byte	4
+ 1957 02cc 08        		.byte	8
+ 1958 02cd 48        		.byte	72
+ 1959 02ce 54        		.byte	84
+ 1960 02cf 54        		.byte	84
+ 1961 02d0 54        		.byte	84
+ 1962 02d1 20        		.byte	32
+ 1963 02d2 04        		.byte	4
+ 1964 02d3 3E        		.byte	62
+ 1965 02d4 44        		.byte	68
+ 1966 02d5 40        		.byte	64
+ 1967 02d6 20        		.byte	32
+ 1968 02d7 3C        		.byte	60
+ 1969 02d8 40        		.byte	64
+ 1970 02d9 40        		.byte	64
+ 1971 02da 20        		.byte	32
+ 1972 02db 7C        		.byte	124
+ 1973 02dc 1C        		.byte	28
+ 1974 02dd 20        		.byte	32
+ 1975 02de 40        		.byte	64
+ 1976 02df 20        		.byte	32
+ 1977 02e0 1C        		.byte	28
+ 1978 02e1 3C        		.byte	60
+ 1979 02e2 40        		.byte	64
+ 1980 02e3 30        		.byte	48
+ 1981 02e4 40        		.byte	64
+ 1982 02e5 3C        		.byte	60
+ 1983 02e6 44        		.byte	68
+ 1984 02e7 28        		.byte	40
+ 1985 02e8 10        		.byte	16
+ 1986 02e9 28        		.byte	40
+ 1987 02ea 44        		.byte	68
+ 1988 02eb 0C        		.byte	12
+ 1989 02ec 50        		.byte	80
+ 1990 02ed 50        		.byte	80
+ 1991 02ee 50        		.byte	80
+ 1992 02ef 3C        		.byte	60
+ 1993 02f0 44        		.byte	68
+ 1994 02f1 64        		.byte	100
+ 1995 02f2 54        		.byte	84
+ 1996 02f3 4C        		.byte	76
+ 1997 02f4 44        		.byte	68
+ 1998 02f5 00        		.byte	0
+ 1999 02f6 08        		.byte	8
+ 2000 02f7 36        		.byte	54
+ 2001 02f8 41        		.byte	65
+ 2002 02f9 00        		.byte	0
+ 2003 02fa 20        		.byte	32
+ 2004 02fb 40        		.byte	64
+ 2005 02fc FF        		.byte	-1
+ 2006 02fd 40        		.byte	64
+ 2007 02fe 20        		.byte	32
+ 2008 02ff 00        		.byte	0
+ 2009 0300 41        		.byte	65
+ 2010 0301 36        		.byte	54
+ 2011 0302 08        		.byte	8
+ 2012 0303 00        		.byte	0
+ 2013 0304 10        		.byte	16
+ 2014 0305 08        		.byte	8
+ 2015 0306 08        		.byte	8
+ 2016 0307 10        		.byte	16
+ 2017 0308 08        		.byte	8
+ 2018               		.comm	line_buffer,16,1
+ 2019               		.text
+ 2020               	.Letext0:
+ 2021               		.file 2 "/usr/local/CrossPack-AVR-20131216/avr/include/stdint.h"
+ 2022               		.file 3 "glcd.h"
+ 2023               		.file 4 "font_alt_5x8.h"
+ 2024               		.file 5 "font_tom_thumb_3x6.h"
+DEFINED SYMBOLS
+                            *ABS*:00000000 font.c
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:2      *ABS*:0000003e __SP_H__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:3      *ABS*:0000003d __SP_L__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:4      *ABS*:0000003f __SREG__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:5      *ABS*:00000000 __tmp_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:6      *ABS*:00000001 __zero_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:12     .text:00000000 font_init
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1537   .progmem.data:00000129 font_alt_5x8
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1219   .bss:00000003 font_ptr
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1231   .bss:0000000a font_w
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1227   .bss:00000008 font_h
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1225   .bss:00000007 font_space
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1229   .bss:00000009 font_ws
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1223   .bss:00000006 font_first_char
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1221   .bss:00000005 font_last_char
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1233   .bss:0000000b font_bytes
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1217   .bss:00000002 font_xpos
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1215   .bss:00000001 font_ypos
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:138    .text:00000068 font_set
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1244   .progmem.data:00000007 tom_thumb_3x6
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:214    .text:000000ae font_mode
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1239   .bss:0000000e font_draw_mode
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:231    .text:000000b4 font_backspace
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1237   .bss:0000000d x_pos
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1235   .bss:0000000c y_pos
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:310    .text:00000136 font_cr
+                             .bss:00000000 font_start_xpos
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:332    .text:0000014a font_lf
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:403    .text:000001a8 font_draw
+                            *COM*:00000010 line_buffer
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:765    .text:00000386 font_draw_stringP
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:818    .text:000003a4 font_draw_on_off
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1212   .progmem.data:00000003 off.2380
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:1208   .progmem.data:00000000 on.2379
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:848    .text:000003b6 font_draw_number
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:955    .text:00000422 font_position
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc29aWXP.s:993    .text:00000448 font_layout
+
+UNDEFINED SYMBOLS
+lcd_set
+x_dim
+__divmodhi4
+y_dim
+prefs
+fill_box
+functabP
+draw_buffer
+__udivmodqi4
+serial_peek
+__do_clear_bss

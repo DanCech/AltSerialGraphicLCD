@@ -1,0 +1,1059 @@
+   1               		.file	"serial.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               	.global	serial_baudrate
+  12               	serial_baudrate:
+  13               	.LFB12:
+  14               		.file 1 "serial.c"
+   1:serial.c      **** /* -*- c++ -*- ***************************************************************
+   2:serial.c      ****  *
+   3:serial.c      ****  *  System      : Serial GLCD
+   4:serial.c      ****  *  Module      : Serial Handling
+   5:serial.c      ****  *  Object Name : $RCSfile: serial.c,v $
+   6:serial.c      ****  *  Revision    : $Revision: 1.13 $
+   7:serial.c      ****  *  Date        : $Date: 2015/07/05 21:06:13 $
+   8:serial.c      ****  *  Author      : $Author: jon $
+   9:serial.c      ****  *  Created By  : Jon Green
+  10:serial.c      ****  *  Created     : Sun Apr 5 08:43:33 2015 Last Modified : <150704.0822>
+  11:serial.c      ****  *
+  12:serial.c      ****  *  Description : Handles all of the serial input
+  13:serial.c      ****  *
+  14:serial.c      ****  *  Notes       : Derrived from the code by Jennifer Holt and adapted for the
+  15:serial.c      ****  *               160x128 screen.
+  16:serial.c      ****  *
+  17:serial.c      ****  *  History     :
+  18:serial.c      ****  *
+  19:serial.c      ****  *****************************************************************************
+  20:serial.c      ****  *
+  21:serial.c      ****  *  Copyright (c) 2010 Jennifer Holt
+  22:serial.c      ****  *  Copyright (c) 2015 Jon Green
+  23:serial.c      ****  *
+  24:serial.c      ****  *  Permission is hereby granted, free of charge, to any person obtaining a
+  25:serial.c      ****  *  copy of this software and associated documentation files (the "Software"),
+  26:serial.c      ****  *  to deal in the Software without restriction, including without limitation
+  27:serial.c      ****  *  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+  28:serial.c      ****  *  and/or sell copies of the Software, and to permit persons to whom the
+  29:serial.c      ****  *  Software is furnished to do so, subject to the following conditions:
+  30:serial.c      ****  *
+  31:serial.c      ****  *  The above copyright notice and this permission notice shall be included in
+  32:serial.c      ****  *  all copies or substantial portions of the Software.
+  33:serial.c      ****  *
+  34:serial.c      ****  *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  35:serial.c      ****  *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  36:serial.c      ****  *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+  37:serial.c      ****  *  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  38:serial.c      ****  *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+  39:serial.c      ****  *  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+  40:serial.c      ****  *  DEALINGS IN THE SOFTWARE.
+  41:serial.c      ****  *
+  42:serial.c      ****  ****************************************************************************/
+  43:serial.c      **** 
+  44:serial.c      **** #include <avr/pgmspace.h>
+  45:serial.c      **** #include <avr/interrupt.h>
+  46:serial.c      **** #include <avr/boot.h>
+  47:serial.c      **** #include <avr/wdt.h>                    /* Watchdog timer */
+  48:serial.c      **** #include <avr/io.h>
+  49:serial.c      **** 
+  50:serial.c      **** #include "glcd.h"
+  51:serial.c      **** 
+  52:serial.c      **** typedef uint8_t serial_t;
+  53:serial.c      **** 
+  54:serial.c      **** // The current write position; we write to the head.
+  55:serial.c      **** static volatile serial_t rx_head;
+  56:serial.c      **** 
+  57:serial.c      **** // The current read position, we read from the tail
+  58:serial.c      **** static volatile serial_t rx_tail;
+  59:serial.c      **** 
+  60:serial.c      **** // Keeps track of the # of bytes in the RX buffer
+  61:serial.c      **** static volatile serial_t rx_count;
+  62:serial.c      **** 
+  63:serial.c      **** // Flags if RX has been suspended
+  64:serial.c      **** static volatile uint8_t rx_pause;
+  65:serial.c      **** 
+  66:serial.c      **** // The actual buffer itself
+  67:serial.c      **** static uint8_t rx_buffer[RX_BUFFER_SIZE];
+  68:serial.c      **** 
+  69:serial.c      **** //////////////////////////////////////////////////////////////////////////////
+  70:serial.c      **** /// Initialise the serial port.
+  71:serial.c      **** /// Set up the hardware. This may be invoked
+  72:serial.c      **** /// multiple times in order to change the serial baud rate.
+  73:serial.c      **** ///
+  74:serial.c      **** void
+  75:serial.c      **** serial_init (void)
+  76:serial.c      **** {
+  77:serial.c      ****     // Set up the ring buffer.
+  78:serial.c      ****     rx_count = 0;
+  79:serial.c      ****     rx_head = 0;
+  80:serial.c      ****     rx_tail = 0;
+  81:serial.c      ****     rx_pause = 0;
+  82:serial.c      **** 
+  83:serial.c      ****     // Configure the serial port.
+  84:serial.c      ****     serial_baudrate (BAUD_RATE_DEFAULT);
+  85:serial.c      **** }
+  86:serial.c      **** 
+  87:serial.c      **** //////////////////////////////////////////////////////////////////////////////
+  88:serial.c      **** /// Reconfigure the serial port.
+  89:serial.c      **** /// Set up the hardware. This may be invoked
+  90:serial.c      **** /// multiple times in order to change the serial baud rate.
+  91:serial.c      **** ///
+  92:serial.c      **** /// @param [in] baud The baud rate of the port. A value of zero sets the
+  93:serial.c      **** ///                  default baud rate.
+  94:serial.c      **** ///
+  95:serial.c      **** ///                  The valid baud rates are defined as follows:
+  96:serial.c      **** ///
+  97:serial.c      **** /// @                baud_rate_4800   = 1
+  98:serial.c      **** ///                  baud_rate_9600   = 2
+  99:serial.c      **** ///                  baud_rate_19200  = 3
+ 100:serial.c      **** ///                  baud_rate_38400  = 4
+ 101:serial.c      **** ///                  baud_rate_57600  = 5
+ 102:serial.c      **** ///                  baud_rate_115200 = 6 [Default]
+ 103:serial.c      **** ///
+ 104:serial.c      **** /// @return The value of baud that the system is using.
+ 105:serial.c      **** ///
+ 106:serial.c      **** uint8_t
+ 107:serial.c      **** serial_baudrate (uint8_t baud)
+ 108:serial.c      **** {
+  15               		.loc 1 108 0
+  16               		.cfi_startproc
+  17               	.LVL0:
+  18 0000 CF93      		push r28
+  19               	.LCFI0:
+  20               		.cfi_def_cfa_offset 3
+  21               		.cfi_offset 28, -2
+  22               	/* prologue: function */
+  23               	/* frame size = 0 */
+  24               	/* stack size = 1 */
+  25               	.L__stack_usage = 1
+  26 0002 C82F      		mov r28,r24
+ 109:serial.c      ****     uint16_t rate;
+ 110:serial.c      **** 
+ 111:serial.c      ****     // Allow ASCII characters; convert from ASCII to interger. Binary
+ 112:serial.c      ****     // characters are processed un-modified.
+ 113:serial.c      ****     if (baud >= '1')
+  27               		.loc 1 113 0
+  28 0004 8133      		cpi r24,lo8(49)
+  29 0006 00F0      		brlo .L2
+ 114:serial.c      ****         baud -= '0';
+  30               		.loc 1 114 0
+  31 0008 C053      		subi r28,lo8(-(-48))
+  32               	.LVL1:
+  33               	.L2:
+ 115:serial.c      **** 
+ 116:serial.c      ****     // Ensure that the baud rate is valid, otherwise use the default.
+ 117:serial.c      ****     if (baud_rate_invalid (baud))
+  34               		.loc 1 117 0
+  35 000a 8FEF      		ldi r24,lo8(-1)
+  36 000c 8C0F      		add r24,r28
+  37 000e 8630      		cpi r24,lo8(6)
+  38 0010 00F0      		brlo .L3
+  39               	.L5:
+ 118:serial.c      ****         baud = BAUD_RATE_DEFAULT;
+ 119:serial.c      **** 
+ 120:serial.c      ****     // Get the appropriate setting for the hardware.
+ 121:serial.c      ****     if (baud == BAUD_RATE_4800)
+ 122:serial.c      ****         rate = (uint16_t)(1000000L / 2400L - 1);
+ 123:serial.c      ****     else if (baud == BAUD_RATE_9600)
+ 124:serial.c      ****         rate = (uint16_t)(1000000L / 4800L - 1);
+ 125:serial.c      ****     else if (baud == BAUD_RATE_19200)
+ 126:serial.c      ****         rate = (uint16_t)(1000000L / 9600L - 1);
+ 127:serial.c      ****     else if (baud == BAUD_RATE_38400)
+ 128:serial.c      ****         rate = (uint16_t)(1000000L / 19200L - 1);
+ 129:serial.c      ****     else if (baud == BAUD_RATE_57600)
+ 130:serial.c      ****         rate = (uint16_t)(1000000L / 28800L - 1);
+ 131:serial.c      ****     else // Default to 115200 if nothing is valid.
+ 132:serial.c      ****     {
+ 133:serial.c      ****         rate = (uint16_t)(1000000L / 57600L - 1);
+  40               		.loc 1 133 0
+  41 0012 80E1      		ldi r24,lo8(16)
+  42 0014 90E0      		ldi r25,0
+ 134:serial.c      ****         baud = BAUD_RATE_115200;
+  43               		.loc 1 134 0
+  44 0016 C6E0      		ldi r28,lo8(6)
+  45               	.LVL2:
+  46 0018 00C0      		rjmp .L4
+  47               	.LVL3:
+  48               	.L3:
+ 121:serial.c      ****     if (baud == BAUD_RATE_4800)
+  49               		.loc 1 121 0
+  50 001a C130      		cpi r28,lo8(1)
+  51 001c 01F0      		breq .L6
+ 123:serial.c      ****     else if (baud == BAUD_RATE_9600)
+  52               		.loc 1 123 0
+  53 001e C230      		cpi r28,lo8(2)
+  54 0020 01F0      		breq .L7
+ 125:serial.c      ****     else if (baud == BAUD_RATE_19200)
+  55               		.loc 1 125 0
+  56 0022 C330      		cpi r28,lo8(3)
+  57 0024 01F0      		breq .L8
+ 127:serial.c      ****     else if (baud == BAUD_RATE_38400)
+  58               		.loc 1 127 0
+  59 0026 C430      		cpi r28,lo8(4)
+  60 0028 01F0      		breq .L9
+ 129:serial.c      ****     else if (baud == BAUD_RATE_57600)
+  61               		.loc 1 129 0
+  62 002a C530      		cpi r28,lo8(5)
+  63 002c 01F4      		brne .L5
+ 130:serial.c      ****         rate = (uint16_t)(1000000L / 28800L - 1);
+  64               		.loc 1 130 0
+  65 002e 81E2      		ldi r24,lo8(33)
+  66 0030 00C0      		rjmp .L10
+  67               	.L6:
+ 122:serial.c      ****         rate = (uint16_t)(1000000L / 2400L - 1);
+  68               		.loc 1 122 0
+  69 0032 8FE9      		ldi r24,lo8(-97)
+  70 0034 91E0      		ldi r25,lo8(1)
+  71 0036 00C0      		rjmp .L4
+  72               	.L7:
+ 124:serial.c      ****         rate = (uint16_t)(1000000L / 4800L - 1);
+  73               		.loc 1 124 0
+  74 0038 8FEC      		ldi r24,lo8(-49)
+  75 003a 00C0      		rjmp .L10
+  76               	.L8:
+ 126:serial.c      ****         rate = (uint16_t)(1000000L / 9600L - 1);
+  77               		.loc 1 126 0
+  78 003c 87E6      		ldi r24,lo8(103)
+  79 003e 00C0      		rjmp .L10
+  80               	.L9:
+ 128:serial.c      ****         rate = (uint16_t)(1000000L / 19200L - 1);
+  81               		.loc 1 128 0
+  82 0040 83E3      		ldi r24,lo8(51)
+  83               	.L10:
+  84 0042 90E0      		ldi r25,0
+  85               	.LVL4:
+  86               	.L4:
+ 135:serial.c      ****     }
+ 136:serial.c      **** 
+ 137:serial.c      ****     cli();
+  87               		.loc 1 137 0
+  88               	/* #APP */
+  89               	 ;  137 "serial.c" 1
+  90 0044 F894      		cli
+  91               	 ;  0 "" 2
+ 138:serial.c      ****     // Set baud rate
+ 139:serial.c      ****     UBRR0H = (uint8_t) (rate >> 8);
+  92               		.loc 1 139 0
+  93               	/* #NOAPP */
+  94 0046 9093 C500 		sts 197,r25
+ 140:serial.c      ****     UBRR0L = (uint8_t) (rate & 0xff);
+  95               		.loc 1 140 0
+  96 004a 8093 C400 		sts 196,r24
+ 141:serial.c      **** 
+ 142:serial.c      ****     // Enable receiver and transmitter
+ 143:serial.c      ****     UCSR0A = (1 << U2X0);
+  97               		.loc 1 143 0
+  98 004e 82E0      		ldi r24,lo8(2)
+  99               	.LVL5:
+ 100 0050 8093 C000 		sts 192,r24
+ 101               	.LVL6:
+ 144:serial.c      **** 
+ 145:serial.c      ****     // Enable Interrupts on receive character
+ 146:serial.c      ****     UCSR0B = (1 << RXCIE0)|(1 << RXEN0)|(1 << TXEN0);
+ 102               		.loc 1 146 0
+ 103 0054 88E9      		ldi r24,lo8(-104)
+ 104 0056 8093 C100 		sts 193,r24
+ 147:serial.c      ****     UCSR0C = (1 << UCSZ00)|(1 << UCSZ01);
+ 105               		.loc 1 147 0
+ 106 005a 86E0      		ldi r24,lo8(6)
+ 107 005c 8093 C200 		sts 194,r24
+ 148:serial.c      ****     sei();
+ 108               		.loc 1 148 0
+ 109               	/* #APP */
+ 110               	 ;  148 "serial.c" 1
+ 111 0060 7894      		sei
+ 112               	 ;  0 "" 2
+ 149:serial.c      **** 
+ 150:serial.c      ****     // Save the baud rate in EEPROM
+ 151:serial.c      ****     lcd_set (LCD_SET_CHECKBYTE, EEPROM_ADDR_BAUDRATE, baud);
+ 113               		.loc 1 151 0
+ 114               	/* #NOAPP */
+ 115 0062 4C2F      		mov r20,r28
+ 116 0064 61E0      		ldi r22,lo8(1)
+ 117 0066 85EC      		ldi r24,lo8(-59)
+ 118 0068 0E94 0000 		call lcd_set
+ 119               	.LVL7:
+ 152:serial.c      **** 
+ 153:serial.c      ****     // Return the rate that we are using.
+ 154:serial.c      ****     return baud;
+ 155:serial.c      **** }
+ 120               		.loc 1 155 0
+ 121 006c 8C2F      		mov r24,r28
+ 122               	/* epilogue start */
+ 123 006e CF91      		pop r28
+ 124               	.LVL8:
+ 125 0070 0895      		ret
+ 126               		.cfi_endproc
+ 127               	.LFE12:
+ 129               	.global	serial_init
+ 131               	serial_init:
+ 132               	.LFB11:
+  76:serial.c      **** {
+ 133               		.loc 1 76 0
+ 134               		.cfi_startproc
+ 135               	/* prologue: function */
+ 136               	/* frame size = 0 */
+ 137               	/* stack size = 0 */
+ 138               	.L__stack_usage = 0
+  78:serial.c      ****     rx_count = 0;
+ 139               		.loc 1 78 0
+ 140 0072 1092 0000 		sts rx_count,__zero_reg__
+  79:serial.c      ****     rx_head = 0;
+ 141               		.loc 1 79 0
+ 142 0076 1092 0000 		sts rx_head,__zero_reg__
+  80:serial.c      ****     rx_tail = 0;
+ 143               		.loc 1 80 0
+ 144 007a 1092 0000 		sts rx_tail,__zero_reg__
+  81:serial.c      ****     rx_pause = 0;
+ 145               		.loc 1 81 0
+ 146 007e 1092 0000 		sts rx_pause,__zero_reg__
+  84:serial.c      ****     serial_baudrate (BAUD_RATE_DEFAULT);
+ 147               		.loc 1 84 0
+ 148 0082 86E0      		ldi r24,lo8(6)
+ 149 0084 0C94 0000 		jmp serial_baudrate
+ 150               	.LVL9:
+ 151               		.cfi_endproc
+ 152               	.LFE11:
+ 154               	.global	serial_putc
+ 156               	serial_putc:
+ 157               	.LFB17:
+ 156:serial.c      **** 
+ 157:serial.c      **** //////////////////////////////////////////////////////////////////////////////
+ 158:serial.c      **** ///
+ 159:serial.c      **** /// Flush all input in the serial buffer
+ 160:serial.c      **** ///
+ 161:serial.c      **** void
+ 162:serial.c      **** serial_flush (void)
+ 163:serial.c      **** {
+ 164:serial.c      ****     // Disable interrupts and reset the ring buffer variables.
+ 165:serial.c      ****     cli();
+ 166:serial.c      ****     rx_head = 0;
+ 167:serial.c      ****     rx_tail = 0;
+ 168:serial.c      ****     rx_count = 0;
+ 169:serial.c      ****     rx_pause = 0;
+ 170:serial.c      ****     sei();
+ 171:serial.c      **** 
+ 172:serial.c      ****     // Send a XON to tell the host to resume sending and re-enable
+ 173:serial.c      ****     // reception
+ 174:serial.c      ****     serial_putc (CHAR_XON);
+ 175:serial.c      **** }
+ 176:serial.c      **** 
+ 177:serial.c      **** //////////////////////////////////////////////////////////////////////////////
+ 178:serial.c      **** ///
+ 179:serial.c      **** /// Peek into the RX_buffer and retrieve a character from the RX_buffer before
+ 180:serial.c      **** /// it is at the head of the queue. The method blocks until a character has
+ 181:serial.c      **** /// been received.
+ 182:serial.c      **** ///
+ 183:serial.c      **** /// @param [in] offset The offset from the read position. A value of '0' would
+ 184:serial.c      **** ///                    be the next character to be read with rx_read();
+ 185:serial.c      **** ///
+ 186:serial.c      **** /// @return The character at the peek position.
+ 187:serial.c      **** ///
+ 188:serial.c      **** char
+ 189:serial.c      **** serial_peek (uint16_t offset)
+ 190:serial.c      **** {
+ 191:serial.c      ****     // Wait for the the character to enter the RX_buffer.
+ 192:serial.c      ****     while (rx_count <= offset)
+ 193:serial.c      ****     {
+ 194:serial.c      ****         // Reset the watchdog so it does not fire
+ 195:serial.c      ****         wdt_reset(); 
+ 196:serial.c      **** 
+ 197:serial.c      ****         // We do not have enough characters. If we are blocking then initiate
+ 198:serial.c      ****         // an unblock. Because the peek is requested in internally then we
+ 199:serial.c      ****         // assume that the buffer is large enough for the peek that we
+ 200:serial.c      ****         // require so we do not need to check the XON threshold.
+ 201:serial.c      ****         if (rx_pause != 0)
+ 202:serial.c      ****         {
+ 203:serial.c      ****             // Send a XON to tell the host to resume sending and re-enable
+ 204:serial.c      ****             // reception
+ 205:serial.c      ****             serial_putc (CHAR_XON);
+ 206:serial.c      ****             rx_pause = 0;
+ 207:serial.c      ****         }
+ 208:serial.c      ****     }
+ 209:serial.c      **** 
+ 210:serial.c      ****     // The byte has arrived in the rx_buffer, calculate the position to read
+ 211:serial.c      ****     // the buffer.
+ 212:serial.c      ****     offset += rx_tail;
+ 213:serial.c      ****     if (offset >= RX_BUFFER_SIZE)
+ 214:serial.c      ****         offset -= RX_BUFFER_SIZE;
+ 215:serial.c      **** 
+ 216:serial.c      ****     // Reset the watchdog so it does not fire
+ 217:serial.c      ****     wdt_reset(); 
+ 218:serial.c      ****     
+ 219:serial.c      ****     // Return the character.
+ 220:serial.c      ****     return rx_buffer [offset];
+ 221:serial.c      **** }
+ 222:serial.c      **** 
+ 223:serial.c      **** //////////////////////////////////////////////////////////////////////////////
+ 224:serial.c      **** ///
+ 225:serial.c      **** /// Read a byte from the RX_buffer from the head of the queue. The method
+ 226:serial.c      **** /// blocks until a character has been received.
+ 227:serial.c      **** ///
+ 228:serial.c      **** /// @return The character at the read position.
+ 229:serial.c      **** ///
+ 230:serial.c      **** char
+ 231:serial.c      **** serial_getc (void)
+ 232:serial.c      **** {
+ 233:serial.c      ****     char cc;
+ 234:serial.c      **** 
+ 235:serial.c      ****     // Wait for data to be available
+ 236:serial.c      ****     while (rx_count == 0)
+ 237:serial.c      ****     {
+ 238:serial.c      ****         // Reset the watchdog so it does not fire
+ 239:serial.c      ****         wdt_reset(); 
+ 240:serial.c      ****     }
+ 241:serial.c      ****         
+ 242:serial.c      ****     // Get char from buffer and increment read pointer. If the read pointer
+ 243:serial.c      ****     // reaches the end of the buffer, wrap back to the beginning.
+ 244:serial.c      ****     cc = rx_buffer [rx_tail++];
+ 245:serial.c      **** #if RX_BUFFER_SIZE != 265
+ 246:serial.c      ****     if (rx_tail >= RX_BUFFER_SIZE)
+ 247:serial.c      ****         rx_tail = 0;
+ 248:serial.c      **** #endif
+ 249:serial.c      ****     // Interrupts must be disabled when changing rx_count, since it can be
+ 250:serial.c      ****     // changed here and in the ISR.
+ 251:serial.c      ****     cli();
+ 252:serial.c      ****     rx_count--;
+ 253:serial.c      ****     sei();
+ 254:serial.c      **** 
+ 255:serial.c      ****     // Check to see if we need to re-enable reception
+ 256:serial.c      ****     if (rx_pause != 0)
+ 257:serial.c      ****     {
+ 258:serial.c      ****         // USART reception is currently suspended re-enable reception if the
+ 259:serial.c      ****         // RX_buffer is suitably empty
+ 260:serial.c      ****         if (rx_count < prefs_xon)
+ 261:serial.c      ****         {
+ 262:serial.c      ****             // Send a XON to tell the host to resume sending and re-enable
+ 263:serial.c      ****             // reception
+ 264:serial.c      ****             serial_putc (CHAR_XON);
+ 265:serial.c      ****             rx_pause = 0;
+ 266:serial.c      ****         }
+ 267:serial.c      ****     }
+ 268:serial.c      **** 
+ 269:serial.c      ****     // Reset the watchdog so it does not fire
+ 270:serial.c      ****     wdt_reset(); 
+ 271:serial.c      ****     
+ 272:serial.c      ****     // Return the character to the caller.
+ 273:serial.c      ****     return cc;
+ 274:serial.c      **** }
+ 275:serial.c      **** 
+ 276:serial.c      **** //////////////////////////////////////////////////////////////////////////////
+ 277:serial.c      **** ///
+ 278:serial.c      **** /// Flush n bytes from the RX_buffer at the head of the queue. 
+ 279:serial.c      **** ///
+ 280:serial.c      **** /// @param [in] bytes The number of bytes to remove from the queue.
+ 281:serial.c      **** ///
+ 282:serial.c      **** /// @return the number of bytes flushed.
+ 283:serial.c      **** ///
+ 284:serial.c      **** uint8_t 
+ 285:serial.c      **** serial_flushc (uint8_t bytes)
+ 286:serial.c      **** {
+ 287:serial.c      ****     // Interrupts must be disabled when changing rx_count, since it can be
+ 288:serial.c      ****     // changed here and in the ISR. 
+ 289:serial.c      ****     cli();
+ 290:serial.c      ****     if (rx_count >= bytes)
+ 291:serial.c      ****         rx_count -= bytes;
+ 292:serial.c      ****     else
+ 293:serial.c      ****     {
+ 294:serial.c      ****         bytes = rx_count;
+ 295:serial.c      ****         rx_count = 0;
+ 296:serial.c      ****     }
+ 297:serial.c      ****     sei();
+ 298:serial.c      ****     
+ 299:serial.c      ****     // Adjust the tail to match
+ 300:serial.c      ****     rx_tail += bytes;
+ 301:serial.c      **** #if RX_BUFFER_SIZE != 265
+ 302:serial.c      ****     if (rx_tail >= RX_BUFFER_SIZE)
+ 303:serial.c      ****         rx_tail -= RX_BUFFER_SIZE;
+ 304:serial.c      **** #endif
+ 305:serial.c      ****     // Check to see if we need to re-enable reception
+ 306:serial.c      ****     if (rx_pause != 0)
+ 307:serial.c      ****     {
+ 308:serial.c      ****         // USART reception is currently suspended re-enable reception if the
+ 309:serial.c      ****         // RX_buffer is suitably empty
+ 310:serial.c      ****         if (rx_count < prefs_xon)
+ 311:serial.c      ****         {
+ 312:serial.c      ****             // Send a XON to tell the host to resume sending and re-enable
+ 313:serial.c      ****             // reception
+ 314:serial.c      ****             serial_putc (CHAR_XON);
+ 315:serial.c      ****             rx_pause = 0;
+ 316:serial.c      ****         }
+ 317:serial.c      ****     }
+ 318:serial.c      **** 
+ 319:serial.c      ****     // Return the number of bytes removed to the caller.
+ 320:serial.c      ****     return bytes;
+ 321:serial.c      **** }
+ 322:serial.c      **** 
+ 323:serial.c      **** //////////////////////////////////////////////////////////////////////////////
+ 324:serial.c      **** ///
+ 325:serial.c      **** /// Put a character to the serial.
+ 326:serial.c      **** ///
+ 327:serial.c      **** /// @param [in] cc The character to write on the TX.
+ 328:serial.c      **** ///
+ 329:serial.c      **** void
+ 330:serial.c      **** serial_putc (char cc)
+ 331:serial.c      **** {
+ 158               		.loc 1 331 0
+ 159               		.cfi_startproc
+ 160               	/* prologue: function */
+ 161               	/* frame size = 0 */
+ 162               	/* stack size = 0 */
+ 163               	.L__stack_usage = 0
+ 164               	.LVL10:
+ 165               	.L15:
+ 332:serial.c      ****     // Wait for empty transmit buffer.
+ 333:serial.c      ****     while (!( UCSR0A & (1 << UDRE0)))
+ 166               		.loc 1 333 0 discriminator 1
+ 167 0088 9091 C000 		lds r25,192
+ 168 008c 95FF      		sbrs r25,5
+ 169 008e 00C0      		rjmp .L15
+ 334:serial.c      ****         /* Do nothing */ ;
+ 335:serial.c      **** 
+ 336:serial.c      ****     // Put data into buffer, sends the data
+ 337:serial.c      ****     UDR0 = cc;
+ 170               		.loc 1 337 0
+ 171 0090 8093 C600 		sts 198,r24
+ 172 0094 0895      		ret
+ 173               		.cfi_endproc
+ 174               	.LFE17:
+ 176               	.global	serial_flush
+ 178               	serial_flush:
+ 179               	.LFB13:
+ 163:serial.c      **** {
+ 180               		.loc 1 163 0
+ 181               		.cfi_startproc
+ 182               	/* prologue: function */
+ 183               	/* frame size = 0 */
+ 184               	/* stack size = 0 */
+ 185               	.L__stack_usage = 0
+ 165:serial.c      ****     cli();
+ 186               		.loc 1 165 0
+ 187               	/* #APP */
+ 188               	 ;  165 "serial.c" 1
+ 189 0096 F894      		cli
+ 190               	 ;  0 "" 2
+ 166:serial.c      ****     rx_head = 0;
+ 191               		.loc 1 166 0
+ 192               	/* #NOAPP */
+ 193 0098 1092 0000 		sts rx_head,__zero_reg__
+ 167:serial.c      ****     rx_tail = 0;
+ 194               		.loc 1 167 0
+ 195 009c 1092 0000 		sts rx_tail,__zero_reg__
+ 168:serial.c      ****     rx_count = 0;
+ 196               		.loc 1 168 0
+ 197 00a0 1092 0000 		sts rx_count,__zero_reg__
+ 169:serial.c      ****     rx_pause = 0;
+ 198               		.loc 1 169 0
+ 199 00a4 1092 0000 		sts rx_pause,__zero_reg__
+ 170:serial.c      ****     sei();
+ 200               		.loc 1 170 0
+ 201               	/* #APP */
+ 202               	 ;  170 "serial.c" 1
+ 203 00a8 7894      		sei
+ 204               	 ;  0 "" 2
+ 174:serial.c      ****     serial_putc (CHAR_XON);
+ 205               		.loc 1 174 0
+ 206               	/* #NOAPP */
+ 207 00aa 81E1      		ldi r24,lo8(17)
+ 208 00ac 0C94 0000 		jmp serial_putc
+ 209               	.LVL11:
+ 210               		.cfi_endproc
+ 211               	.LFE13:
+ 213               	.global	serial_peek
+ 215               	serial_peek:
+ 216               	.LFB14:
+ 190:serial.c      **** {
+ 217               		.loc 1 190 0
+ 218               		.cfi_startproc
+ 219               	.LVL12:
+ 220 00b0 CF93      		push r28
+ 221               	.LCFI1:
+ 222               		.cfi_def_cfa_offset 3
+ 223               		.cfi_offset 28, -2
+ 224 00b2 DF93      		push r29
+ 225               	.LCFI2:
+ 226               		.cfi_def_cfa_offset 4
+ 227               		.cfi_offset 29, -3
+ 228               	/* prologue: function */
+ 229               	/* frame size = 0 */
+ 230               	/* stack size = 2 */
+ 231               	.L__stack_usage = 2
+ 232 00b4 EC01      		movw r28,r24
+ 233               	.LVL13:
+ 234               	.L20:
+ 192:serial.c      ****     while (rx_count <= offset)
+ 235               		.loc 1 192 0 discriminator 1
+ 236 00b6 8091 0000 		lds r24,rx_count
+ 237 00ba 90E0      		ldi r25,0
+ 238 00bc C817      		cp r28,r24
+ 239 00be D907      		cpc r29,r25
+ 240 00c0 00F0      		brlo .L23
+ 195:serial.c      ****         wdt_reset(); 
+ 241               		.loc 1 195 0
+ 242               	/* #APP */
+ 243               	 ;  195 "serial.c" 1
+ 244 00c2 A895      		wdr
+ 245               	 ;  0 "" 2
+ 201:serial.c      ****         if (rx_pause != 0)
+ 246               		.loc 1 201 0
+ 247               	/* #NOAPP */
+ 248 00c4 8091 0000 		lds r24,rx_pause
+ 249 00c8 8823      		tst r24
+ 250 00ca 01F0      		breq .L20
+ 205:serial.c      ****             serial_putc (CHAR_XON);
+ 251               		.loc 1 205 0
+ 252 00cc 81E1      		ldi r24,lo8(17)
+ 253 00ce 0E94 0000 		call serial_putc
+ 254               	.LVL14:
+ 206:serial.c      ****             rx_pause = 0;
+ 255               		.loc 1 206 0
+ 256 00d2 1092 0000 		sts rx_pause,__zero_reg__
+ 257 00d6 00C0      		rjmp .L20
+ 258               	.L23:
+ 212:serial.c      ****     offset += rx_tail;
+ 259               		.loc 1 212 0
+ 260 00d8 8091 0000 		lds r24,rx_tail
+ 261 00dc 9E01      		movw r18,r28
+ 262 00de 280F      		add r18,r24
+ 263 00e0 311D      		adc r19,__zero_reg__
+ 264 00e2 C901      		movw r24,r18
+ 265               	.LVL15:
+ 213:serial.c      ****     if (offset >= RX_BUFFER_SIZE)
+ 266               		.loc 1 213 0
+ 267 00e4 2F3F      		cpi r18,-1
+ 268 00e6 3105      		cpc r19,__zero_reg__
+ 269 00e8 01F0      		breq .L22
+ 270 00ea 00F0      		brlo .L22
+ 214:serial.c      ****         offset -= RX_BUFFER_SIZE;
+ 271               		.loc 1 214 0
+ 272 00ec 9A95      		dec r25
+ 273               	.LVL16:
+ 274               	.L22:
+ 217:serial.c      ****     wdt_reset(); 
+ 275               		.loc 1 217 0
+ 276               	/* #APP */
+ 277               	 ;  217 "serial.c" 1
+ 278 00ee A895      		wdr
+ 279               	 ;  0 "" 2
+ 220:serial.c      ****     return rx_buffer [offset];
+ 280               		.loc 1 220 0
+ 281               	/* #NOAPP */
+ 282 00f0 FC01      		movw r30,r24
+ 283 00f2 E050      		subi r30,lo8(-(rx_buffer))
+ 284 00f4 F040      		sbci r31,hi8(-(rx_buffer))
+ 221:serial.c      **** }
+ 285               		.loc 1 221 0
+ 286 00f6 8081      		ld r24,Z
+ 287               	.LVL17:
+ 288               	/* epilogue start */
+ 289 00f8 DF91      		pop r29
+ 290 00fa CF91      		pop r28
+ 291 00fc 0895      		ret
+ 292               		.cfi_endproc
+ 293               	.LFE14:
+ 295               	.global	serial_getc
+ 297               	serial_getc:
+ 298               	.LFB15:
+ 232:serial.c      **** {
+ 299               		.loc 1 232 0
+ 300               		.cfi_startproc
+ 301 00fe CF93      		push r28
+ 302               	.LCFI3:
+ 303               		.cfi_def_cfa_offset 3
+ 304               		.cfi_offset 28, -2
+ 305               	/* prologue: function */
+ 306               	/* frame size = 0 */
+ 307               	/* stack size = 1 */
+ 308               	.L__stack_usage = 1
+ 309               	.L25:
+ 236:serial.c      ****     while (rx_count == 0)
+ 310               		.loc 1 236 0 discriminator 1
+ 311 0100 8091 0000 		lds r24,rx_count
+ 312 0104 8111      		cpse r24,__zero_reg__
+ 313 0106 00C0      		rjmp .L31
+ 239:serial.c      ****         wdt_reset(); 
+ 314               		.loc 1 239 0
+ 315               	/* #APP */
+ 316               	 ;  239 "serial.c" 1
+ 317 0108 A895      		wdr
+ 318               	 ;  0 "" 2
+ 319               	/* #NOAPP */
+ 320 010a 00C0      		rjmp .L25
+ 321               	.L31:
+ 244:serial.c      ****     cc = rx_buffer [rx_tail++];
+ 322               		.loc 1 244 0
+ 323 010c E091 0000 		lds r30,rx_tail
+ 324 0110 81E0      		ldi r24,lo8(1)
+ 325 0112 8E0F      		add r24,r30
+ 326 0114 8093 0000 		sts rx_tail,r24
+ 327 0118 F0E0      		ldi r31,0
+ 328 011a E050      		subi r30,lo8(-(rx_buffer))
+ 329 011c F040      		sbci r31,hi8(-(rx_buffer))
+ 330 011e C081      		ld r28,Z
+ 331               	.LVL18:
+ 246:serial.c      ****     if (rx_tail >= RX_BUFFER_SIZE)
+ 332               		.loc 1 246 0
+ 333 0120 8091 0000 		lds r24,rx_tail
+ 251:serial.c      ****     cli();
+ 334               		.loc 1 251 0
+ 335               	/* #APP */
+ 336               	 ;  251 "serial.c" 1
+ 337 0124 F894      		cli
+ 338               	 ;  0 "" 2
+ 252:serial.c      ****     rx_count--;
+ 339               		.loc 1 252 0
+ 340               	/* #NOAPP */
+ 341 0126 9091 0000 		lds r25,rx_count
+ 342 012a 9150      		subi r25,lo8(-(-1))
+ 343 012c 9093 0000 		sts rx_count,r25
+ 253:serial.c      ****     sei();
+ 344               		.loc 1 253 0
+ 345               	/* #APP */
+ 346               	 ;  253 "serial.c" 1
+ 347 0130 7894      		sei
+ 348               	 ;  0 "" 2
+ 256:serial.c      ****     if (rx_pause != 0)
+ 349               		.loc 1 256 0
+ 350               	/* #NOAPP */
+ 351 0132 8091 0000 		lds r24,rx_pause
+ 352 0136 8823      		tst r24
+ 353 0138 01F0      		breq .L27
+ 260:serial.c      ****         if (rx_count < prefs_xon)
+ 354               		.loc 1 260 0
+ 355 013a 9091 0000 		lds r25,rx_count
+ 356 013e 8091 0000 		lds r24,prefs+7
+ 357 0142 9817      		cp r25,r24
+ 358 0144 00F4      		brsh .L27
+ 264:serial.c      ****             serial_putc (CHAR_XON);
+ 359               		.loc 1 264 0
+ 360 0146 81E1      		ldi r24,lo8(17)
+ 361 0148 0E94 0000 		call serial_putc
+ 362               	.LVL19:
+ 265:serial.c      ****             rx_pause = 0;
+ 363               		.loc 1 265 0
+ 364 014c 1092 0000 		sts rx_pause,__zero_reg__
+ 365               	.L27:
+ 270:serial.c      ****     wdt_reset(); 
+ 366               		.loc 1 270 0
+ 367               	/* #APP */
+ 368               	 ;  270 "serial.c" 1
+ 369 0150 A895      		wdr
+ 370               	 ;  0 "" 2
+ 274:serial.c      **** }
+ 371               		.loc 1 274 0
+ 372               	/* #NOAPP */
+ 373 0152 8C2F      		mov r24,r28
+ 374               	/* epilogue start */
+ 375 0154 CF91      		pop r28
+ 376               	.LVL20:
+ 377 0156 0895      		ret
+ 378               		.cfi_endproc
+ 379               	.LFE15:
+ 381               	.global	serial_flushc
+ 383               	serial_flushc:
+ 384               	.LFB16:
+ 286:serial.c      **** {
+ 385               		.loc 1 286 0
+ 386               		.cfi_startproc
+ 387               	.LVL21:
+ 388 0158 CF93      		push r28
+ 389               	.LCFI4:
+ 390               		.cfi_def_cfa_offset 3
+ 391               		.cfi_offset 28, -2
+ 392               	/* prologue: function */
+ 393               	/* frame size = 0 */
+ 394               	/* stack size = 1 */
+ 395               	.L__stack_usage = 1
+ 396 015a C82F      		mov r28,r24
+ 289:serial.c      ****     cli();
+ 397               		.loc 1 289 0
+ 398               	/* #APP */
+ 399               	 ;  289 "serial.c" 1
+ 400 015c F894      		cli
+ 401               	 ;  0 "" 2
+ 290:serial.c      ****     if (rx_count >= bytes)
+ 402               		.loc 1 290 0
+ 403               	/* #NOAPP */
+ 404 015e 8091 0000 		lds r24,rx_count
+ 405               	.LVL22:
+ 406 0162 8C17      		cp r24,r28
+ 407 0164 00F0      		brlo .L33
+ 291:serial.c      ****         rx_count -= bytes;
+ 408               		.loc 1 291 0
+ 409 0166 8091 0000 		lds r24,rx_count
+ 410 016a 8C1B      		sub r24,r28
+ 411 016c 8093 0000 		sts rx_count,r24
+ 412 0170 00C0      		rjmp .L34
+ 413               	.L33:
+ 294:serial.c      ****         bytes = rx_count;
+ 414               		.loc 1 294 0
+ 415 0172 C091 0000 		lds r28,rx_count
+ 416               	.LVL23:
+ 295:serial.c      ****         rx_count = 0;
+ 417               		.loc 1 295 0
+ 418 0176 1092 0000 		sts rx_count,__zero_reg__
+ 419               	.L34:
+ 297:serial.c      ****     sei();
+ 420               		.loc 1 297 0
+ 421               	/* #APP */
+ 422               	 ;  297 "serial.c" 1
+ 423 017a 7894      		sei
+ 424               	 ;  0 "" 2
+ 300:serial.c      ****     rx_tail += bytes;
+ 425               		.loc 1 300 0
+ 426               	/* #NOAPP */
+ 427 017c 8091 0000 		lds r24,rx_tail
+ 428 0180 8C0F      		add r24,r28
+ 429 0182 8093 0000 		sts rx_tail,r24
+ 302:serial.c      ****     if (rx_tail >= RX_BUFFER_SIZE)
+ 430               		.loc 1 302 0
+ 431 0186 8091 0000 		lds r24,rx_tail
+ 306:serial.c      ****     if (rx_pause != 0)
+ 432               		.loc 1 306 0
+ 433 018a 8091 0000 		lds r24,rx_pause
+ 434 018e 8823      		tst r24
+ 435 0190 01F0      		breq .L35
+ 310:serial.c      ****         if (rx_count < prefs_xon)
+ 436               		.loc 1 310 0
+ 437 0192 9091 0000 		lds r25,rx_count
+ 438 0196 8091 0000 		lds r24,prefs+7
+ 439 019a 9817      		cp r25,r24
+ 440 019c 00F4      		brsh .L35
+ 314:serial.c      ****             serial_putc (CHAR_XON);
+ 441               		.loc 1 314 0
+ 442 019e 81E1      		ldi r24,lo8(17)
+ 443 01a0 0E94 0000 		call serial_putc
+ 444               	.LVL24:
+ 315:serial.c      ****             rx_pause = 0;
+ 445               		.loc 1 315 0
+ 446 01a4 1092 0000 		sts rx_pause,__zero_reg__
+ 447               	.L35:
+ 321:serial.c      **** }
+ 448               		.loc 1 321 0
+ 449 01a8 8C2F      		mov r24,r28
+ 450               	/* epilogue start */
+ 451 01aa CF91      		pop r28
+ 452               	.LVL25:
+ 453 01ac 0895      		ret
+ 454               		.cfi_endproc
+ 455               	.LFE16:
+ 457               	.global	__vector_18
+ 459               	__vector_18:
+ 460               	.LFB18:
+ 338:serial.c      **** }
+ 339:serial.c      **** 
+ 340:serial.c      **** /////////////////////////////////////////////////////////////////////////////
+ 341:serial.c      **** ///
+ 342:serial.c      **** /// USART interrupt handler.
+ 343:serial.c      **** ///
+ 344:serial.c      **** /// Read the data from the serial port and add to the rx_buffer.
+ 345:serial.c      **** ///
+ 346:serial.c      **** ISR (USART_RX_vect)
+ 347:serial.c      **** {
+ 461               		.loc 1 347 0
+ 462               		.cfi_startproc
+ 463 01ae 1F92      		push r1
+ 464               	.LCFI5:
+ 465               		.cfi_def_cfa_offset 3
+ 466               		.cfi_offset 1, -2
+ 467 01b0 0F92      		push r0
+ 468               	.LCFI6:
+ 469               		.cfi_def_cfa_offset 4
+ 470               		.cfi_offset 0, -3
+ 471 01b2 0FB6      		in r0,__SREG__
+ 472 01b4 0F92      		push r0
+ 473 01b6 1124      		clr __zero_reg__
+ 474 01b8 2F93      		push r18
+ 475               	.LCFI7:
+ 476               		.cfi_def_cfa_offset 5
+ 477               		.cfi_offset 18, -4
+ 478 01ba 3F93      		push r19
+ 479               	.LCFI8:
+ 480               		.cfi_def_cfa_offset 6
+ 481               		.cfi_offset 19, -5
+ 482 01bc 4F93      		push r20
+ 483               	.LCFI9:
+ 484               		.cfi_def_cfa_offset 7
+ 485               		.cfi_offset 20, -6
+ 486 01be 5F93      		push r21
+ 487               	.LCFI10:
+ 488               		.cfi_def_cfa_offset 8
+ 489               		.cfi_offset 21, -7
+ 490 01c0 6F93      		push r22
+ 491               	.LCFI11:
+ 492               		.cfi_def_cfa_offset 9
+ 493               		.cfi_offset 22, -8
+ 494 01c2 7F93      		push r23
+ 495               	.LCFI12:
+ 496               		.cfi_def_cfa_offset 10
+ 497               		.cfi_offset 23, -9
+ 498 01c4 8F93      		push r24
+ 499               	.LCFI13:
+ 500               		.cfi_def_cfa_offset 11
+ 501               		.cfi_offset 24, -10
+ 502 01c6 9F93      		push r25
+ 503               	.LCFI14:
+ 504               		.cfi_def_cfa_offset 12
+ 505               		.cfi_offset 25, -11
+ 506 01c8 AF93      		push r26
+ 507               	.LCFI15:
+ 508               		.cfi_def_cfa_offset 13
+ 509               		.cfi_offset 26, -12
+ 510 01ca BF93      		push r27
+ 511               	.LCFI16:
+ 512               		.cfi_def_cfa_offset 14
+ 513               		.cfi_offset 27, -13
+ 514 01cc EF93      		push r30
+ 515               	.LCFI17:
+ 516               		.cfi_def_cfa_offset 15
+ 517               		.cfi_offset 30, -14
+ 518 01ce FF93      		push r31
+ 519               	.LCFI18:
+ 520               		.cfi_def_cfa_offset 16
+ 521               		.cfi_offset 31, -15
+ 522               	/* prologue: Signal */
+ 523               	/* frame size = 0 */
+ 524               	/* stack size = 15 */
+ 525               	.L__stack_usage = 15
+ 348:serial.c      ****     cli();                              // Disable Interrupts
+ 526               		.loc 1 348 0
+ 527               	/* #APP */
+ 528               	 ;  348 "serial.c" 1
+ 529 01d0 F894      		cli
+ 530               	 ;  0 "" 2
+ 349:serial.c      **** 
+ 350:serial.c      ****     rx_buffer [rx_head++] = UDR0;       // Get recieved byte
+ 531               		.loc 1 350 0
+ 532               	/* #NOAPP */
+ 533 01d2 E091 0000 		lds r30,rx_head
+ 534 01d6 81E0      		ldi r24,lo8(1)
+ 535 01d8 8E0F      		add r24,r30
+ 536 01da 8093 0000 		sts rx_head,r24
+ 537 01de 8091 C600 		lds r24,198
+ 538 01e2 F0E0      		ldi r31,0
+ 539 01e4 E050      		subi r30,lo8(-(rx_buffer))
+ 540 01e6 F040      		sbci r31,hi8(-(rx_buffer))
+ 541 01e8 8083      		st Z,r24
+ 351:serial.c      **** #if RX_BUFFER_SIZE != 265
+ 352:serial.c      ****     if (rx_head >= RX_BUFFER_SIZE)
+ 542               		.loc 1 352 0
+ 543 01ea 8091 0000 		lds r24,rx_head
+ 353:serial.c      ****         rx_head = 0;                    // Wrap to start of buffer
+ 354:serial.c      **** #endif
+ 355:serial.c      ****     if (rx_count == 255)
+ 544               		.loc 1 355 0
+ 545 01ee 8091 0000 		lds r24,rx_count
+ 546 01f2 8F3F      		cpi r24,lo8(-1)
+ 547 01f4 01F4      		brne .L40
+ 356:serial.c      ****         serial_putc (0xff);
+ 548               		.loc 1 356 0
+ 549 01f6 0E94 0000 		call serial_putc
+ 550               	.LVL26:
+ 551               	.L40:
+ 357:serial.c      **** 
+ 358:serial.c      ****     rx_count++;                         // Keep count of bytes in buffer
+ 552               		.loc 1 358 0
+ 553 01fa 8091 0000 		lds r24,rx_count
+ 554 01fe 8F5F      		subi r24,lo8(-(1))
+ 555 0200 8093 0000 		sts rx_count,r24
+ 359:serial.c      **** 
+ 360:serial.c      ****     // Test for the receive buffer close to full, if we can transmit without
+ 361:serial.c      ****     // blocking the ISR then send an XOFF .
+ 362:serial.c      ****     if (rx_count > prefs_xoff)
+ 556               		.loc 1 362 0
+ 557 0204 9091 0000 		lds r25,rx_count
+ 558 0208 8091 0000 		lds r24,prefs+8
+ 559 020c 8917      		cp r24,r25
+ 560 020e 00F4      		brsh .L41
+ 363:serial.c      ****     {
+ 364:serial.c      ****         if ((UCSR0A & (1 << UDRE0)))
+ 561               		.loc 1 364 0
+ 562 0210 8091 C000 		lds r24,192
+ 563 0214 85FF      		sbrs r24,5
+ 564 0216 00C0      		rjmp .L41
+ 365:serial.c      ****         {
+ 366:serial.c      ****             UDR0 = CHAR_XOFF;           // Send XOFF
+ 565               		.loc 1 366 0
+ 566 0218 83E1      		ldi r24,lo8(19)
+ 567 021a 8093 C600 		sts 198,r24
+ 367:serial.c      ****             rx_pause = 1;               // Flag reception suspended
+ 568               		.loc 1 367 0
+ 569 021e 81E0      		ldi r24,lo8(1)
+ 570 0220 8093 0000 		sts rx_pause,r24
+ 571               	.L41:
+ 368:serial.c      ****         }
+ 369:serial.c      ****     }
+ 370:serial.c      **** 
+ 371:serial.c      ****     sei();                              // Enable Interrupts
+ 572               		.loc 1 371 0
+ 573               	/* #APP */
+ 574               	 ;  371 "serial.c" 1
+ 575 0224 7894      		sei
+ 576               	 ;  0 "" 2
+ 577               	/* epilogue start */
+ 372:serial.c      **** }
+ 578               		.loc 1 372 0
+ 579               	/* #NOAPP */
+ 580 0226 FF91      		pop r31
+ 581 0228 EF91      		pop r30
+ 582 022a BF91      		pop r27
+ 583 022c AF91      		pop r26
+ 584 022e 9F91      		pop r25
+ 585 0230 8F91      		pop r24
+ 586 0232 7F91      		pop r23
+ 587 0234 6F91      		pop r22
+ 588 0236 5F91      		pop r21
+ 589 0238 4F91      		pop r20
+ 590 023a 3F91      		pop r19
+ 591 023c 2F91      		pop r18
+ 592 023e 0F90      		pop r0
+ 593 0240 0FBE      		out __SREG__,r0
+ 594 0242 0F90      		pop r0
+ 595 0244 1F90      		pop r1
+ 596 0246 1895      		reti
+ 597               		.cfi_endproc
+ 598               	.LFE18:
+ 600               		.local	rx_buffer
+ 601               		.comm	rx_buffer,256,1
+ 602               		.local	rx_pause
+ 603               		.comm	rx_pause,1,1
+ 604               		.local	rx_count
+ 605               		.comm	rx_count,1,1
+ 606               		.local	rx_tail
+ 607               		.comm	rx_tail,1,1
+ 608               		.local	rx_head
+ 609               		.comm	rx_head,1,1
+ 610               		.comm	line_buffer,16,1
+ 611               	.Letext0:
+ 612               		.file 2 "/usr/local/CrossPack-AVR-20131216/avr/include/stdint.h"
+ 613               		.file 3 "glcd.h"
+DEFINED SYMBOLS
+                            *ABS*:00000000 serial.c
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:2      *ABS*:0000003e __SP_H__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:3      *ABS*:0000003d __SP_L__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:4      *ABS*:0000003f __SREG__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:5      *ABS*:00000000 __tmp_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:6      *ABS*:00000001 __zero_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:12     .text:00000000 serial_baudrate
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:131    .text:00000072 serial_init
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:603    .bss:00000101 rx_count
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:607    .bss:00000103 rx_head
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:605    .bss:00000102 rx_tail
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:601    .bss:00000100 rx_pause
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:156    .text:00000088 serial_putc
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:178    .text:00000096 serial_flush
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:215    .text:000000b0 serial_peek
+                             .bss:00000000 rx_buffer
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:297    .text:000000fe serial_getc
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:383    .text:00000158 serial_flushc
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//ccLFW1WZ.s:459    .text:000001ae __vector_18
+                            *COM*:00000010 line_buffer
+
+UNDEFINED SYMBOLS
+lcd_set
+prefs
+__do_clear_bss

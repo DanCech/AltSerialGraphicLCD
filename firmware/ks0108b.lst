@@ -1,0 +1,4119 @@
+   1               		.file	"ks0108b.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  11               	status_check:
+  12               	.LFB12:
+  13               		.file 1 "ks0108b.c"
+   1:ks0108b.c     **** /* -*- C++ -*- **************************************************************
+   2:ks0108b.c     ****  *
+   3:ks0108b.c     ****  *  System        : SerialGLCD
+   4:ks0108b.c     ****  *  Module        : KS0108B driver
+   5:ks0108b.c     ****  *  Object Name   : $RCSfile: ks0108b.c,v $
+   6:ks0108b.c     ****  *  Revision      : $Revision: 1.30 $
+   7:ks0108b.c     ****  *  Date          : $Date: 2015/07/05 21:09:53 $
+   8:ks0108b.c     ****  *  Author        : $Author: jon $
+   9:ks0108b.c     ****  *  Created By    : Jon Green
+  10:ks0108b.c     ****  *  Created       : Thu Apr 16 21:24:20 2015
+  11:ks0108b.c     ****  *  Last Modified : <150705.1113>
+  12:ks0108b.c     ****  *
+  13:ks0108b.c     ****  *  Description   : Samsung KS0108B LCD screen driver.
+  14:ks0108b.c     ****  *
+  15:ks0108b.c     ****  *  Notes         : Ground up implementation of the KS0180b driver with some
+  16:ks0108b.c     ****  *                  ispiration from:
+  17:ks0108b.c     ****  *
+  18:ks0108b.c     ****  *                  Code by Mike Hord, SparkFun Electronics.
+  19:ks0108b.c     ****  *
+  20:ks0108b.c     ****  *                  Code by Jennifer Holt
+  21:ks0108b.c     ****  *
+  22:ks0108b.c     ****  *  History       :
+  23:ks0108b.c     ****  *
+  24:ks0108b.c     ****  ****************************************************************************/
+  25:ks0108b.c     **** 
+  26:ks0108b.c     **** /****************************************************************************
+  27:ks0108b.c     ****  * 26 April 2015 - Jon Green (jon at jasspa) / jasspa.com
+  28:ks0108b.c     ****  *
+  29:ks0108b.c     ****  * This is a re-write of the KS0108b driver. Both the Sparkfun and Jennifer
+  30:ks0108b.c     ****  * Holt implementations used a timer implementation and did not follow the
+  31:ks0108b.c     ****  * Samsung data sheet for the KS0108b. This version implements the timings
+  32:ks0108b.c     ****  * from the Samsung data sheet and performs a status check to determine when
+  33:ks0108b.c     ****  * the chip is ready to accept the next command. This method considerably
+  34:ks0108b.c     ****  * speeds up the chip access and has significantly changed the structure of
+  35:ks0108b.c     ****  * the driver code. The abstractions used in the Sparkfun implementation i.e.
+  36:ks0108b.c     ****  * io_setup() have been discarded in favour of explicitly setting the I/O
+  37:ks0108b.c     ****  * state in the 3 major read/write methods: ks0108b_read(), ks0108b_write()
+  38:ks0108b.c     ****  * and status_check().
+  39:ks0108b.c     ****  *
+  40:ks0108b.c     ****  * This implementation discards the concept of pages which was used more in
+  41:ks0108b.c     ****  * the Jennifer Holt version. Rather than maintaining the page state then it
+  42:ks0108b.c     ****  * is easier to deal with each side of the LCD explicitly in the block/column
+  43:ks0108b.c     ****  * read and write methods.
+  44:ks0108b.c     ****  *
+  45:ks0108b.c     ****  * The Samsung data sheet uses an X and Y nomenclature for the axis of the
+  46:ks0108b.c     ****  * screen; these are used incorrectly in the conventional sense and the data
+  47:ks0108b.c     ****  * sheet uses X for a row address and Y for a column address.
+  48:ks0108b.c     ****  *
+  49:ks0108b.c     ****  * The EN twiddling for chip enable from both of the previous implementations
+  50:ks0108b.c     ****  * outwardly appeared to be a little strange when reading the code. The
+  51:ks0108b.c     ****  * Samsung data sheet made reference to this in a note on LCD data reading.
+  52:ks0108b.c     ****  * The implementation used here performs a full cycle dummy read (i.e. a
+  53:ks0108b.c     ****  * ks0108b_read() operation) and the data is discarded; a 2nd and any
+  54:ks0108b.c     ****  * subsequent reads are performed to clock the data out. The chip requires
+  55:ks0108b.c     ****  * the first read to transfer the data from the LCD screen to an internal
+  56:ks0108b.c     ****  * register; it is this first read that is discarded. The 2nd and subsequent
+  57:ks0108b.c     ****  * reads then extract the data from the internal register and place it on the
+  58:ks0108b.c     ****  * data bus to be picked up externally. Where performing multiple reads or
+  59:ks0108b.c     ****  * writes the column position is auto incremented and subsequent reads will
+  60:ks0108b.c     ****  * continue to clock the data out so the dummy read is only required on the
+  61:ks0108b.c     ****  * first read when reading multiple bytes. A dummy write cycle is not
+  62:ks0108b.c     ****  * required.
+  63:ks0108b.c     ****  *
+  64:ks0108b.c     ****  * One further note. I cannot fully explain why the Jennifer Holt version
+  65:ks0108b.c     ****  * needed to address the rows with 63 as the top left corner of the screen.
+  66:ks0108b.c     ****  * This version uses 0 as the top left coordinate and does not perform any
+  67:ks0108b.c     ****  * modification. The Samsung datasheet makes mention of the fact that the ADC
+  68:ks0108b.c     ****  * line voltage changes the coordinate system. There is no information in the
+  69:ks0108b.c     ****  * LCD datasheet that the ADC can be changed (unless this is related to the E
+  70:ks0108b.c     ****  * signal).
+  71:ks0108b.c     ****  *
+  72:ks0108b.c     ****  * Extreme care should be taken modifying any of the chip access timings. The
+  73:ks0108b.c     ****  * chip seems to be very sensitive to timings and control/data line settings
+  74:ks0108b.c     ****  * which are very difficult to track down and isolate; this might be easier
+  75:ks0108b.c     ****  * if I had a logic analyzer and could see what was going on. The current
+  76:ks0108b.c     ****  * implementation is very careful in setting any of the PORTC lines and
+  77:ks0108b.c     ****  * ensures that the there are no intermediate transitions when setting
+  78:ks0108b.c     ****  * states. In addition the data lines (PORTD and PORTB) are disabled and
+  79:ks0108b.c     ****  * restored to inputs as soon as any write sequence has finished. These two
+  80:ks0108b.c     ****  * methods together seem to have removed screen corruption. Changes to the
+  81:ks0108b.c     ****  * chip read / write sequence are are difficult to identify immediately and
+  82:ks0108b.c     ****  * may appear to work but they may manifest themselves under heavy load and
+  83:ks0108b.c     ****  * can be spotted by single pixel corruption on screen i.e. a pixel set
+  84:ks0108b.c     ****  * incorrectly; either set or clear when it should not be. If the timings are
+  85:ks0108b.c     ****  * modified in any way then it is advised that a lot of testing is required
+  86:ks0108b.c     ****  * using both sides of the screen to ensure that no regresions are
+  87:ks0108b.c     ****  * introduced.
+  88:ks0108b.c     ****  ***************************************************************************/
+  89:ks0108b.c     **** 
+  90:ks0108b.c     **** /****************************************************************************
+  91:ks0108b.c     ****  * 02 May 2013 - Mike Hord, SparkFun Electronics
+  92:ks0108b.c     ****  *
+  93:ks0108b.c     ****  * This code is released under the Creative Commons Attribution Share-Alike
+  94:ks0108b.c     ****  * 3.0 license. You are free to reuse, remix, or redistribute it as you see
+  95:ks0108b.c     ****  * fit, so long as you provide attribution to SparkFun Electronics.
+  96:ks0108b.c     ****  *
+  97:ks0108b.c     ****  * Copyright (c) 2010 Jennifer Holt
+  98:ks0108b.c     ****  * Copyright (c) 2015 Jon Green
+  99:ks0108b.c     ****  *
+ 100:ks0108b.c     ****  * Permission is hereby granted, free of charge, to any person obtaining a
+ 101:ks0108b.c     ****  * copy of this software and associated documentation files (the "Software"),
+ 102:ks0108b.c     ****  * to deal in the Software without restriction, including without limitation
+ 103:ks0108b.c     ****  * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ 104:ks0108b.c     ****  * and/or sell copies of the Software, and to permit persons to whom the
+ 105:ks0108b.c     ****  * Software is furnished to do so, subject to the following conditions:
+ 106:ks0108b.c     ****  *
+ 107:ks0108b.c     ****  * The above copyright notice and this permission notice shall be included in
+ 108:ks0108b.c     ****  * all copies or substantial portions of the Software.
+ 109:ks0108b.c     ****  *
+ 110:ks0108b.c     ****  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ 111:ks0108b.c     ****  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ 112:ks0108b.c     ****  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ 113:ks0108b.c     ****  * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ 114:ks0108b.c     ****  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ 115:ks0108b.c     ****  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ 116:ks0108b.c     ****  * DEALINGS IN THE SOFTWARE.
+ 117:ks0108b.c     ****  ***************************************************************************/
+ 118:ks0108b.c     **** 
+ 119:ks0108b.c     **** #include <stdlib.h>
+ 120:ks0108b.c     **** #include <string.h>
+ 121:ks0108b.c     **** 
+ 122:ks0108b.c     **** #include <avr/pgmspace.h>
+ 123:ks0108b.c     **** #include <avr/io.h>
+ 124:ks0108b.c     **** #include <avr/interrupt.h>
+ 125:ks0108b.c     **** #include <avr/boot.h>
+ 126:ks0108b.c     **** #include "glcd.h"
+ 127:ks0108b.c     **** 
+ 128:ks0108b.c     **** // 128x64 external control line definitions
+ 129:ks0108b.c     **** #define EN               0              /* PC0 - Chip enable */
+ 130:ks0108b.c     **** #define RS               1              /* PC1 - Data = H or Instruction = L */
+ 131:ks0108b.c     **** #define RW               2              /* PC2 - Read/Write */
+ 132:ks0108b.c     **** #define RES              3              /* PC3 - Reset */
+ 133:ks0108b.c     **** #define CS1              4              /* PC4 - Chip select 1 (x < 64) or both */
+ 134:ks0108b.c     **** #define CS2              5              /* PC5 - Chip select 2 (x > 64) or both */
+ 135:ks0108b.c     **** #define BL_EN            2              /* PB2 - Backlight enable */
+ 136:ks0108b.c     **** 
+ 137:ks0108b.c     **** #define CMD_RS           ((1 << RS) << 8)
+ 138:ks0108b.c     **** #define CMD_RW           ((1 << RW) << 8)
+ 139:ks0108b.c     **** #define CMD_RES          ((1 << RES) << 8)
+ 140:ks0108b.c     **** #define CMD_CS1          ((1 << CS1) << 8)
+ 141:ks0108b.c     **** #define CMD_CS2          ((1 << CS2) << 8)
+ 142:ks0108b.c     **** #define CMD_CS12         (CMD_CS1|CMD_CS2)
+ 143:ks0108b.c     **** 
+ 144:ks0108b.c     **** // Define the display commands.
+ 145:ks0108b.c     **** 
+ 146:ks0108b.c     **** /* Turn the display off */
+ 147:ks0108b.c     **** #define CMD_DISPLAY_ON   (0x003f | CMD_CS12 | CMD_RES)
+ 148:ks0108b.c     **** /* Turn the display on */
+ 149:ks0108b.c     **** #define CMD_DISPLAY_OFF  (0x003e | CMD_CS12 | CMD_RES)
+ 150:ks0108b.c     **** /* Set the column address */
+ 151:ks0108b.c     **** #define CMD_COLUMN       (0x0040 | CMD_RES)
+ 152:ks0108b.c     **** /* Set the row address */
+ 153:ks0108b.c     **** #define CMD_ROW          (0x00b8 | CMD_RES)
+ 154:ks0108b.c     **** /* Data read */
+ 155:ks0108b.c     **** #define CMD_READ         (CMD_RS | CMD_RW | CMD_RES)
+ 156:ks0108b.c     **** /* Data write */
+ 157:ks0108b.c     **** #define CMD_WRITE        (CMD_RS | CMD_RES)
+ 158:ks0108b.c     **** 
+ 159:ks0108b.c     **** // Define the dimensions of the screen
+ 160:ks0108b.c     **** #define SCREEN_WIDTH 128                /* Screen width */
+ 161:ks0108b.c     **** #define SCREEN_HEIGHT 64                /* Screen height */
+ 162:ks0108b.c     **** #define SCREEN_ROWS  (SCREEN_HEIGHT>>3) /* Number of screen rows */
+ 163:ks0108b.c     **** #define SCREEN_PAGE  (SCREEN_WIDTH>>1)  /* Size of screen page */
+ 164:ks0108b.c     **** 
+ 165:ks0108b.c     **** // Screen masks
+ 166:ks0108b.c     **** #define SCREEN_WIDTH_MASK  (SCREEN_WIDTH - 1)
+ 167:ks0108b.c     **** #define SCREEN_HEIGHT_MASK (SCREEN_HEIGHT-1)
+ 168:ks0108b.c     **** #define SCREEN_ROWS_MASK   0x07
+ 169:ks0108b.c     **** 
+ 170:ks0108b.c     **** static uint8_t y_row;                   /* The current y row position */
+ 171:ks0108b.c     **** 
+ 172:ks0108b.c     **** static __inline__ uint8_t
+ 173:ks0108b.c     **** merge_column (uint8_t new_column, uint8_t orig_column, uint8_t mode)
+ 174:ks0108b.c     **** {
+ 175:ks0108b.c     ****     // Normalise the mode to retrieve the operator.
+ 176:ks0108b.c     ****     mode &= MODE_OP_MASK;
+ 177:ks0108b.c     **** 
+ 178:ks0108b.c     ****     if (mode >= MODE_XOR)
+ 179:ks0108b.c     ****     {
+ 180:ks0108b.c     ****         // This is XOR or NAND */
+ 181:ks0108b.c     ****         if ((mode & MODE_XOR) != 0)
+ 182:ks0108b.c     ****         {
+ 183:ks0108b.c     ****             // MODE_XOR - XOR the existing buffer data with read data.
+ 184:ks0108b.c     ****             new_column ^= orig_column;
+ 185:ks0108b.c     ****         }
+ 186:ks0108b.c     ****         else
+ 187:ks0108b.c     ****         {
+ 188:ks0108b.c     ****             // MODE_NAND - Clear bits according to buffer.
+ 189:ks0108b.c     ****             new_column = ~new_column & orig_column;
+ 190:ks0108b.c     ****         }
+ 191:ks0108b.c     ****     }
+ 192:ks0108b.c     ****     else
+ 193:ks0108b.c     ****     {
+ 194:ks0108b.c     ****         // MODE_OR - Set bits according to buffer.
+ 195:ks0108b.c     ****         new_column |= orig_column;
+ 196:ks0108b.c     ****     }
+ 197:ks0108b.c     **** 
+ 198:ks0108b.c     ****     // Return the merge to the caller.
+ 199:ks0108b.c     ****     return new_column;
+ 200:ks0108b.c     **** }
+ 201:ks0108b.c     **** 
+ 202:ks0108b.c     **** //////////////////////////////////////////////////////////////////////////////
+ 203:ks0108b.c     **** /// Perform status check to make sure that the controller is ready.
+ 204:ks0108b.c     **** /// controller. The status_check is performed for the last command that
+ 205:ks0108b.c     **** /// was issued and active on PORTC. The next command to execute is passed
+ 206:ks0108b.c     **** /// in, if the chip_select is different then a status check is performed
+ 207:ks0108b.c     **** /// on the new chip before returning to the caller.
+ 208:ks0108b.c     **** ///
+ 209:ks0108b.c     **** /// The 2nd status check is required, when it is not present then 1/100
+ 210:ks0108b.c     **** /// commands on a chip select change fail which case a screen anomaly.
+ 211:ks0108b.c     **** ///
+ 212:ks0108b.c     **** /// @param [in] portc_next The next portc setting.
+ 213:ks0108b.c     **** static void
+ 214:ks0108b.c     **** status_check (uint8_t portc_next)
+ 215:ks0108b.c     **** {
+  14               		.loc 1 215 0
+  15               		.cfi_startproc
+  16               	.LVL0:
+  17               	/* prologue: function */
+  18               	/* frame size = 0 */
+  19               	/* stack size = 0 */
+  20               	.L__stack_usage = 0
+ 216:ks0108b.c     ****     uint8_t portc;                      // Port c setting
+ 217:ks0108b.c     **** 
+ 218:ks0108b.c     ****     // Set up for status read. Chip select is already defined.
+ 219:ks0108b.c     ****     portc = PORTC;
+  21               		.loc 1 219 0
+  22 0000 98B1      		in r25,0x8
+  23               	.LVL1:
+  24               	.L5:
+  25               	.LBB4:
+ 220:ks0108b.c     **** 
+ 221:ks0108b.c     ****     // Run a single iteration of the loop in the normal case where the chip
+ 222:ks0108b.c     ****     // select does not change. Run 2 iterations of the loop in the case where
+ 223:ks0108b.c     ****     // the chip select does change. The first loop checks the status of the
+ 224:ks0108b.c     ****     // previous command we executed and takes values from PORTC itself. The
+ 225:ks0108b.c     ****     // 2nd loop uses the new commands chip select value and ensures that the
+ 226:ks0108b.c     ****     // newly addresed chip is ready for a command.
+ 227:ks0108b.c     ****     for (;;)
+ 228:ks0108b.c     ****     {
+ 229:ks0108b.c     ****         uint8_t portc_en;               // Port c setting with EN
+ 230:ks0108b.c     **** 
+ 231:ks0108b.c     ****         // Set up PORTC for a status read. Note if we go round the loop again
+ 232:ks0108b.c     ****         // then we need a 500ns strobe so do not fold the commands into the
+ 233:ks0108b.c     ****         // nop's
+ 234:ks0108b.c     ****         portc &= ~(1 << RS);
+  26               		.loc 1 234 0
+  27 0002 292F      		mov r18,r25
+  28 0004 2D7F      		andi r18,lo8(-3)
+  29               	.LVL2:
+ 235:ks0108b.c     ****         portc |= (1 << RW);
+  30               		.loc 1 235 0
+  31 0006 922F      		mov r25,r18
+  32 0008 9460      		ori r25,lo8(4)
+  33               	.LVL3:
+ 236:ks0108b.c     ****         portc_en = portc | (1 << EN);
+  34               		.loc 1 236 0
+  35 000a 2560      		ori r18,lo8(5)
+  36               	.LVL4:
+ 237:ks0108b.c     **** 
+ 238:ks0108b.c     ****         // Change the control lines.
+ 239:ks0108b.c     ****         PORTC = portc;
+  37               		.loc 1 239 0
+  38 000c 98B9      		out 0x8,r25
+ 240:ks0108b.c     **** 
+ 241:ks0108b.c     ****         // Wait at least 140ns before we strobe EN (Tasu) after changing
+ 242:ks0108b.c     ****         // RS+RW. Instead of doing NOPs then prepare the port ready for the
+ 243:ks0108b.c     ****         // write.
+ 244:ks0108b.c     ****         asm volatile ("nop");           //  62.5ns
+  39               		.loc 1 244 0
+  40               	/* #APP */
+  41               	 ;  244 "ks0108b.c" 1
+  42 000e 0000      		nop
+  43               	 ;  0 "" 2
+ 245:ks0108b.c     ****         asm volatile ("nop");           // 125.0ns
+  44               		.loc 1 245 0
+  45               	 ;  245 "ks0108b.c" 1
+  46 0010 0000      		nop
+  47               	 ;  0 "" 2
+ 246:ks0108b.c     ****         asm volatile ("nop");           // 187.5ns
+  48               		.loc 1 246 0
+  49               	 ;  246 "ks0108b.c" 1
+  50 0012 0000      		nop
+  51               	 ;  0 "" 2
+ 247:ks0108b.c     ****         PORTC = portc_en;               //   0.0ns
+  52               		.loc 1 247 0
+  53               	/* #NOAPP */
+  54 0014 28B9      		out 0x8,r18
+ 248:ks0108b.c     ****         // Wait a minimum of 320ns (Td) after EN before attempting a read
+ 249:ks0108b.c     ****         asm volatile ("nop");           //  62.5ns
+  55               		.loc 1 249 0
+  56               	/* #APP */
+  57               	 ;  249 "ks0108b.c" 1
+  58 0016 0000      		nop
+  59               	 ;  0 "" 2
+ 250:ks0108b.c     ****         asm volatile ("nop");           // 125.0ns
+  60               		.loc 1 250 0
+  61               	 ;  250 "ks0108b.c" 1
+  62 0018 0000      		nop
+  63               	 ;  0 "" 2
+ 251:ks0108b.c     ****         asm volatile ("nop");           // 187.5ns
+  64               		.loc 1 251 0
+  65               	 ;  251 "ks0108b.c" 1
+  66 001a 0000      		nop
+  67               	 ;  0 "" 2
+ 252:ks0108b.c     ****         asm volatile ("nop");           // 250.0ns
+  68               		.loc 1 252 0
+  69               	 ;  252 "ks0108b.c" 1
+  70 001c 0000      		nop
+  71               	 ;  0 "" 2
+ 253:ks0108b.c     ****         asm volatile ("nop");           // 312.5ns
+  72               		.loc 1 253 0
+  73               	 ;  253 "ks0108b.c" 1
+  74 001e 0000      		nop
+  75               	 ;  0 "" 2
+ 254:ks0108b.c     ****         asm volatile ("nop");           // 375.0ns
+  76               		.loc 1 254 0
+  77               	 ;  254 "ks0108b.c" 1
+  78 0020 0000      		nop
+  79               	 ;  0 "" 2
+  80               	/* #NOAPP */
+  81               	.L3:
+ 255:ks0108b.c     **** 
+ 256:ks0108b.c     ****         // With the chip enabled continually poll the status until it changes
+ 257:ks0108b.c     ****         // to a ready state. We only pull in the bits we need and can ignore
+ 258:ks0108b.c     ****         // the lower bits as we do not use them
+ 259:ks0108b.c     ****         while ((PIND & 0x80) != 0)      // 437.5ns
+  82               		.loc 1 259 0 discriminator 1
+  83 0022 4F99      		sbic 0x9,7
+  84 0024 00C0      		rjmp .L3
+ 260:ks0108b.c     ****             /* Nothing */;
+ 261:ks0108b.c     ****         PORTC = portc;                  // 500.0ns
+  85               		.loc 1 261 0
+  86 0026 98B9      		out 0x8,r25
+ 262:ks0108b.c     **** 
+ 263:ks0108b.c     ****         // Check if the next portc is going to change the chip select, if it
+ 264:ks0108b.c     ****         // is then we re-execute the loop.
+ 265:ks0108b.c     ****         if (((portc ^ portc_next) & ((1 << CS1) | (1<< CS2))) == 0)
+  87               		.loc 1 265 0
+  88 0028 9827      		eor r25,r24
+  89               	.LVL5:
+  90 002a 9073      		andi r25,lo8(48)
+  91 002c 01F0      		breq .L1
+ 266:ks0108b.c     ****             break;                      // Finished
+ 267:ks0108b.c     **** 
+ 268:ks0108b.c     ****         // Assign the new portc value to be processed, we will drop out of
+ 269:ks0108b.c     ****         // the loop on the next iteration.
+ 270:ks0108b.c     ****         portc = portc_next;
+  92               		.loc 1 270 0
+  93 002e 982F      		mov r25,r24
+  94 0030 00C0      		rjmp .L5
+  95               	.L1:
+  96 0032 0895      		ret
+  97               	.LBE4:
+  98               		.cfi_endproc
+  99               	.LFE12:
+ 102               	ks0108b_write:
+ 103               	.LFB13:
+ 271:ks0108b.c     ****     }
+ 272:ks0108b.c     **** }
+ 273:ks0108b.c     **** 
+ 274:ks0108b.c     **** /////////////////////////////////////////////////////////////////////////////
+ 275:ks0108b.c     **** /// Write a command to the controller. Note that "reading" a command is
+ 276:ks0108b.c     **** /// nonsensical and no cmd_read() function is provided.
+ 277:ks0108b.c     **** ///
+ 278:ks0108b.c     **** /// @param [in] command The command to write.
+ 279:ks0108b.c     **** ///                     The lower 8-bits contain the command.
+ 280:ks0108b.c     **** ///                     The upper 8-bits contain next status to be read.
+ 281:ks0108b.c     **** ///
+ 282:ks0108b.c     **** static void
+ 283:ks0108b.c     **** ks0108b_write (uint16_t data)
+ 284:ks0108b.c     **** {
+ 104               		.loc 1 284 0
+ 105               		.cfi_startproc
+ 106               	.LVL6:
+ 107 0034 1F93      		push r17
+ 108               	.LCFI0:
+ 109               		.cfi_def_cfa_offset 3
+ 110               		.cfi_offset 17, -2
+ 111 0036 CF93      		push r28
+ 112               	.LCFI1:
+ 113               		.cfi_def_cfa_offset 4
+ 114               		.cfi_offset 28, -3
+ 115 0038 DF93      		push r29
+ 116               	.LCFI2:
+ 117               		.cfi_def_cfa_offset 5
+ 118               		.cfi_offset 29, -4
+ 119 003a 1F92      		push __zero_reg__
+ 120               	.LCFI3:
+ 121               		.cfi_def_cfa_offset 6
+ 122 003c CDB7      		in r28,__SP_L__
+ 123 003e DEB7      		in r29,__SP_H__
+ 124               	.LCFI4:
+ 125               		.cfi_def_cfa_register 28
+ 126               	/* prologue: function */
+ 127               	/* frame size = 1 */
+ 128               	/* stack size = 4 */
+ 129               	.L__stack_usage = 4
+ 130 0040 182F      		mov r17,r24
+ 131               	.LVL7:
+ 285:ks0108b.c     ****     uint8_t portc;                      // New portc setting
+ 286:ks0108b.c     ****     uint8_t portc_en;                   // New portc setting with EN
+ 287:ks0108b.c     ****     uint8_t ddrb;                       // Temporary of port B control
+ 288:ks0108b.c     **** 
+ 289:ks0108b.c     ****     // Prepare the portc ready for testing when the status check completes.
+ 290:ks0108b.c     ****     portc = data >> 8;                  // Get the port data
+ 291:ks0108b.c     **** 
+ 292:ks0108b.c     ****     // Ensure the chip is ready for the operation. Send the new portc setting
+ 293:ks0108b.c     ****     // so that the new chip select may be checked for readyness.
+ 294:ks0108b.c     ****     status_check (portc);
+ 132               		.loc 1 294 0
+ 133 0042 892F      		mov r24,r25
+ 134               	.LVL8:
+ 135 0044 9983      		std Y+1,r25
+ 136 0046 0E94 0000 		call status_check
+ 137               	.LVL9:
+ 295:ks0108b.c     **** 
+ 296:ks0108b.c     ****     // Prepare the control lines.
+ 297:ks0108b.c     ****     PORTC = portc;
+ 138               		.loc 1 297 0
+ 139 004a 9981      		ldd r25,Y+1
+ 140 004c 98B9      		out 0x8,r25
+ 298:ks0108b.c     **** 
+ 299:ks0108b.c     ****     // Wait at least 140ns (tASU) before toggling the chip enable. Instead of
+ 300:ks0108b.c     ****     // doing NOPs then prepare the port ready for the write.
+ 301:ks0108b.c     ****     portc_en = portc | (1 << EN);       // 62.5ns
+ 141               		.loc 1 301 0
+ 142 004e 392F      		mov r19,r25
+ 143 0050 3160      		ori r19,lo8(1)
+ 144               	.LVL10:
+ 302:ks0108b.c     **** 
+ 303:ks0108b.c     ****     // Prepare the Port-B data
+ 304:ks0108b.c     ****     PORTD = data & 0xfc;                // 125.0ns, 187.5ns,
+ 145               		.loc 1 304 0
+ 146 0052 812F      		mov r24,r17
+ 147 0054 8C7F      		andi r24,lo8(-4)
+ 148 0056 8BB9      		out 0xb,r24
+ 305:ks0108b.c     ****     PORTB = (PORTB & ~0x03) | (data & 0x03);
+ 149               		.loc 1 305 0
+ 150 0058 25B1      		in r18,0x5
+ 151 005a 812F      		mov r24,r17
+ 152 005c 8370      		andi r24,lo8(3)
+ 153 005e 2C7F      		andi r18,lo8(-4)
+ 154 0060 822B      		or r24,r18
+ 155 0062 85B9      		out 0x5,r24
+ 306:ks0108b.c     ****     ddrb = DDRB | 0x03;
+ 156               		.loc 1 306 0
+ 157 0064 84B1      		in r24,0x4
+ 158 0066 8360      		ori r24,lo8(3)
+ 159               	.LVL11:
+ 307:ks0108b.c     **** 
+ 308:ks0108b.c     ****     // Enable the line the 500ns strobe starts from now.
+ 309:ks0108b.c     ****     PORTC = portc_en;                   //   0.0ns
+ 160               		.loc 1 309 0
+ 161 0068 38B9      		out 0x8,r19
+ 310:ks0108b.c     **** 
+ 311:ks0108b.c     ****     // Wait 500ns before we toggle EN. The data must go on the bus by the
+ 312:ks0108b.c     ****     // 300ns (Tdsu) mark.
+ 313:ks0108b.c     ****     DDRB = ddrb;                        //  62.5ns,
+ 162               		.loc 1 313 0
+ 163 006a 84B9      		out 0x4,r24
+ 314:ks0108b.c     ****     DDRD = 0xfc;                        // 125.0ns, 187.5ns
+ 164               		.loc 1 314 0
+ 165 006c 8CEF      		ldi r24,lo8(-4)
+ 166               	.LVL12:
+ 167 006e 8AB9      		out 0xa,r24
+ 168               	.LVL13:
+ 315:ks0108b.c     ****     asm volatile ("nop");               // 250.0ns
+ 169               		.loc 1 315 0
+ 170               	/* #APP */
+ 171               	 ;  315 "ks0108b.c" 1
+ 172 0070 0000      		nop
+ 173               	 ;  0 "" 2
+ 316:ks0108b.c     ****     asm volatile ("nop");               // 312.5ns
+ 174               		.loc 1 316 0
+ 175               	 ;  316 "ks0108b.c" 1
+ 176 0072 0000      		nop
+ 177               	 ;  0 "" 2
+ 317:ks0108b.c     ****     asm volatile ("nop");               // 375.0ns
+ 178               		.loc 1 317 0
+ 179               	 ;  317 "ks0108b.c" 1
+ 180 0074 0000      		nop
+ 181               	 ;  0 "" 2
+ 318:ks0108b.c     ****     asm volatile ("nop");               // 437.5ns
+ 182               		.loc 1 318 0
+ 183               	 ;  318 "ks0108b.c" 1
+ 184 0076 0000      		nop
+ 185               	 ;  0 "" 2
+ 319:ks0108b.c     ****     PORTC = portc;                      // 500.0ns
+ 186               		.loc 1 319 0
+ 187               	/* #NOAPP */
+ 188 0078 98B9      		out 0x8,r25
+ 320:ks0108b.c     ****     // Wait 10ns - we do not need to do anything here.
+ 321:ks0108b.c     ****     // Leave the data lines set to input
+ 322:ks0108b.c     ****     DDRD = 0;
+ 189               		.loc 1 322 0
+ 190 007a 1AB8      		out 0xa,__zero_reg__
+ 323:ks0108b.c     ****     DDRB &= ~0x03;
+ 191               		.loc 1 323 0
+ 192 007c 84B1      		in r24,0x4
+ 193 007e 8C7F      		andi r24,lo8(-4)
+ 194 0080 84B9      		out 0x4,r24
+ 195               	/* epilogue start */
+ 324:ks0108b.c     **** }
+ 196               		.loc 1 324 0
+ 197 0082 0F90      		pop __tmp_reg__
+ 198 0084 DF91      		pop r29
+ 199 0086 CF91      		pop r28
+ 200 0088 1F91      		pop r17
+ 201 008a 0895      		ret
+ 202               		.cfi_endproc
+ 203               	.LFE13:
+ 206               	ks0108b_read:
+ 207               	.LFB14:
+ 325:ks0108b.c     **** 
+ 326:ks0108b.c     **** /////////////////////////////////////////////////////////////////////////////
+ 327:ks0108b.c     **** /// Read a byte of data from the screen
+ 328:ks0108b.c     **** ///
+ 329:ks0108b.c     **** /// @return The screen data read.
+ 330:ks0108b.c     **** /// /
+ 331:ks0108b.c     **** static uint8_t
+ 332:ks0108b.c     **** ks0108b_read (uint16_t command)
+ 333:ks0108b.c     **** {
+ 208               		.loc 1 333 0
+ 209               		.cfi_startproc
+ 210               	.LVL14:
+ 211 008c CF93      		push r28
+ 212               	.LCFI5:
+ 213               		.cfi_def_cfa_offset 3
+ 214               		.cfi_offset 28, -2
+ 215 008e DF93      		push r29
+ 216               	.LCFI6:
+ 217               		.cfi_def_cfa_offset 4
+ 218               		.cfi_offset 29, -3
+ 219 0090 1F92      		push __zero_reg__
+ 220               	.LCFI7:
+ 221               		.cfi_def_cfa_offset 5
+ 222 0092 CDB7      		in r28,__SP_L__
+ 223 0094 DEB7      		in r29,__SP_H__
+ 224               	.LCFI8:
+ 225               		.cfi_def_cfa_register 28
+ 226               	/* prologue: function */
+ 227               	/* frame size = 1 */
+ 228               	/* stack size = 3 */
+ 229               	.L__stack_usage = 3
+ 230               	.LVL15:
+ 334:ks0108b.c     ****     uint8_t data;                       // The data to read
+ 335:ks0108b.c     ****     uint8_t portc;                      // New port c setting
+ 336:ks0108b.c     ****     uint8_t portc_en;                   // New port c setting with EN
+ 337:ks0108b.c     **** 
+ 338:ks0108b.c     ****     // Set up the data lines. For data read we need RS=1 and RW=1
+ 339:ks0108b.c     ****     portc = command >> 8;
+ 340:ks0108b.c     **** 
+ 341:ks0108b.c     ****     // Ensure the chip is ready for the operation. Send the new portc setting
+ 342:ks0108b.c     ****     // so that the new chip select may be checked for readyness.
+ 343:ks0108b.c     ****     status_check (portc);
+ 231               		.loc 1 343 0
+ 232 0096 892F      		mov r24,r25
+ 233               	.LVL16:
+ 234 0098 9983      		std Y+1,r25
+ 235 009a 0E94 0000 		call status_check
+ 236               	.LVL17:
+ 344:ks0108b.c     **** 
+ 345:ks0108b.c     ****     // Wait 140ns (tASU) before toggling the chip enable. Instead of doing
+ 346:ks0108b.c     ****     // NOPs then prepare the port ready for the read.
+ 347:ks0108b.c     ****     PORTC = portc;                      //   0.0ns
+ 237               		.loc 1 347 0
+ 238 009e 9981      		ldd r25,Y+1
+ 239 00a0 98B9      		out 0x8,r25
+ 348:ks0108b.c     ****     portc_en = portc | (1 << EN);       //  62.5ns, 125.0ns
+ 240               		.loc 1 348 0
+ 241 00a2 892F      		mov r24,r25
+ 242 00a4 8160      		ori r24,lo8(1)
+ 243               	.LVL18:
+ 349:ks0108b.c     ****     asm volatile ("nop");               // 187.5ns
+ 244               		.loc 1 349 0
+ 245               	/* #APP */
+ 246               	 ;  349 "ks0108b.c" 1
+ 247 00a6 0000      		nop
+ 248               	 ;  0 "" 2
+ 350:ks0108b.c     **** 
+ 351:ks0108b.c     ****     // Enable the command
+ 352:ks0108b.c     ****     PORTC = portc_en;                   //   0.0ns
+ 249               		.loc 1 352 0
+ 250               	/* #NOAPP */
+ 251 00a8 88B9      		out 0x8,r24
+ 353:ks0108b.c     **** 
+ 354:ks0108b.c     ****     // Wait 500ns before we toggle EN.
+ 355:ks0108b.c     ****     // Wait a minimum of 320ns (Td) after EN before attempting a read
+ 356:ks0108b.c     ****     asm volatile ("nop");               //  62.5ns
+ 252               		.loc 1 356 0
+ 253               	/* #APP */
+ 254               	 ;  356 "ks0108b.c" 1
+ 255 00aa 0000      		nop
+ 256               	 ;  0 "" 2
+ 357:ks0108b.c     ****     asm volatile ("nop");               // 125.0ns
+ 257               		.loc 1 357 0
+ 258               	 ;  357 "ks0108b.c" 1
+ 259 00ac 0000      		nop
+ 260               	 ;  0 "" 2
+ 358:ks0108b.c     ****     asm volatile ("nop");               // 187.5ns
+ 261               		.loc 1 358 0
+ 262               	 ;  358 "ks0108b.c" 1
+ 263 00ae 0000      		nop
+ 264               	 ;  0 "" 2
+ 359:ks0108b.c     ****     asm volatile ("nop");               // 250.0ns
+ 265               		.loc 1 359 0
+ 266               	 ;  359 "ks0108b.c" 1
+ 267 00b0 0000      		nop
+ 268               	 ;  0 "" 2
+ 360:ks0108b.c     ****     asm volatile ("nop");               // 312.5ns
+ 269               		.loc 1 360 0
+ 270               	 ;  360 "ks0108b.c" 1
+ 271 00b2 0000      		nop
+ 272               	 ;  0 "" 2
+ 361:ks0108b.c     ****     asm volatile ("nop");               // 375.0ns
+ 273               		.loc 1 361 0
+ 274               	 ;  361 "ks0108b.c" 1
+ 275 00b4 0000      		nop
+ 276               	 ;  0 "" 2
+ 362:ks0108b.c     ****     // Pull the data in
+ 363:ks0108b.c     ****     data = PINB & 0x03;                 // 437.5ns
+ 277               		.loc 1 363 0
+ 278               	/* #NOAPP */
+ 279 00b6 83B1      		in r24,0x3
+ 280               	.LVL19:
+ 364:ks0108b.c     ****     data |= PIND & 0xfc;                // 500.0ns
+ 281               		.loc 1 364 0
+ 282 00b8 29B1      		in r18,0x9
+ 283 00ba 2C7F      		andi r18,lo8(-4)
+ 363:ks0108b.c     ****     data = PINB & 0x03;                 // 437.5ns
+ 284               		.loc 1 363 0
+ 285 00bc 8370      		andi r24,lo8(3)
+ 286               	.LVL20:
+ 365:ks0108b.c     ****     PORTC = portc;                      // +500.0ns
+ 287               		.loc 1 365 0
+ 288 00be 98B9      		out 0x8,r25
+ 289               	.LVL21:
+ 366:ks0108b.c     **** 
+ 367:ks0108b.c     ****     return data;
+ 368:ks0108b.c     **** }
+ 290               		.loc 1 368 0
+ 291 00c0 822B      		or r24,r18
+ 292               	.LVL22:
+ 293               	/* epilogue start */
+ 294 00c2 0F90      		pop __tmp_reg__
+ 295 00c4 DF91      		pop r29
+ 296 00c6 CF91      		pop r28
+ 297 00c8 0895      		ret
+ 298               		.cfi_endproc
+ 299               	.LFE14:
+ 302               	set_y_position:
+ 303               	.LFB15:
+ 369:ks0108b.c     **** 
+ 370:ks0108b.c     **** //////////////////////////////////////////////////////////////////////////////
+ 371:ks0108b.c     **** /// Set the y column. This function caches the current y row position and
+ 372:ks0108b.c     **** /// instructs the display to modify the row position when the cached version
+ 373:ks0108b.c     **** /// does not match the new row. This prevents display commands being
+ 374:ks0108b.c     **** /// dispatched for continual position changes on the same line that affect x
+ 375:ks0108b.c     **** /// bit not y.
+ 376:ks0108b.c     **** ///
+ 377:ks0108b.c     **** /// @param [in] y The new y position required.
+ 378:ks0108b.c     **** ///
+ 379:ks0108b.c     **** static void
+ 380:ks0108b.c     **** set_y_position (uint8_t y)
+ 381:ks0108b.c     **** {
+ 304               		.loc 1 381 0
+ 305               		.cfi_startproc
+ 306               	.LVL23:
+ 307               	/* prologue: function */
+ 308               	/* frame size = 0 */
+ 309               	/* stack size = 0 */
+ 310               	.L__stack_usage = 0
+ 382:ks0108b.c     ****     // Ensure y is in the correct range.
+ 383:ks0108b.c     ****     y &= 0x7;
+ 311               		.loc 1 383 0
+ 312 00ca 8770      		andi r24,lo8(7)
+ 313               	.LVL24:
+ 384:ks0108b.c     **** 
+ 385:ks0108b.c     ****     // If the row is already selected then skip the position command.
+ 386:ks0108b.c     ****     if (y_row != y)
+ 314               		.loc 1 386 0
+ 315 00cc 9091 0000 		lds r25,y_row
+ 316 00d0 9817      		cp r25,r24
+ 317 00d2 01F0      		breq .L9
+ 387:ks0108b.c     ****     {
+ 388:ks0108b.c     ****         // The row position has changed, move to the new row and update the
+ 389:ks0108b.c     ****         // internal row position.
+ 390:ks0108b.c     ****         y_row = y;                      // Update the cached row position.
+ 318               		.loc 1 390 0
+ 319 00d4 8093 0000 		sts y_row,r24
+ 391:ks0108b.c     ****         ks0108b_write (CMD_ROW|CMD_CS12|y); // Set the row on the display.
+ 320               		.loc 1 391 0
+ 321 00d8 90E0      		ldi r25,0
+ 322 00da 886B      		ori r24,184
+ 323 00dc 9863      		ori r25,56
+ 324               	.LVL25:
+ 325 00de 0C94 0000 		jmp ks0108b_write
+ 326               	.LVL26:
+ 327               	.L9:
+ 328 00e2 0895      		ret
+ 329               		.cfi_endproc
+ 330               	.LFE15:
+ 333               	read_block:
+ 334               	.LFB16:
+ 392:ks0108b.c     ****     }
+ 393:ks0108b.c     **** }
+ 394:ks0108b.c     **** 
+ 395:ks0108b.c     **** /////////////////////////////////////////////////////////////////////////////
+ 396:ks0108b.c     **** /// Read a row of bytes from the screen.
+ 397:ks0108b.c     **** /// Reads [length] display bytes from page [page] starting at horizontal
+ 398:ks0108b.c     **** /// value [x] and puts the values in buf automatically accounts for crossing
+ 399:ks0108b.c     **** /// chips. The command may perform an in-place operation and merge existing
+ 400:ks0108b.c     **** /// data that is in the buffer as part of the read process depending on the
+ 401:ks0108b.c     **** /// value of flags.
+ 402:ks0108b.c     **** ///
+ 403:ks0108b.c     **** /// @param [in] x The column to start at.
+ 404:ks0108b.c     **** /// @param [in] page The page (y axis) to process.
+ 405:ks0108b.c     **** /// @param [in] length The length (number columns) to read.
+ 406:ks0108b.c     **** /// @param [out] buf The buffer to read the data into.
+ 407:ks0108b.c     **** /// @param [in] mask The data mask
+ 408:ks0108b.c     **** /// @param [in] mode The merge operation to perform.
+ 409:ks0108b.c     **** ///             0x00 - No merge required.
+ 410:ks0108b.c     **** ///             0x80 - Merge required - NAND bits cleared in buffer
+ 411:ks0108b.c     **** ///                    buffer[x] = read_data & ~buffer[x]
+ 412:ks0108b.c     **** ///             0x81 - Merge - OR bits set in buffer
+ 413:ks0108b.c     **** ///                    buffer[x] |= read_data
+ 414:ks0108b.c     **** static void
+ 415:ks0108b.c     **** read_block (uint8_t x, uint8_t y_row, uint8_t length, uint8_t *buf, uint8_t mask, uint8_t mode)
+ 416:ks0108b.c     **** {
+ 335               		.loc 1 416 0
+ 336               		.cfi_startproc
+ 337               	.LVL27:
+ 338 00e4 4F92      		push r4
+ 339               	.LCFI9:
+ 340               		.cfi_def_cfa_offset 3
+ 341               		.cfi_offset 4, -2
+ 342 00e6 5F92      		push r5
+ 343               	.LCFI10:
+ 344               		.cfi_def_cfa_offset 4
+ 345               		.cfi_offset 5, -3
+ 346 00e8 6F92      		push r6
+ 347               	.LCFI11:
+ 348               		.cfi_def_cfa_offset 5
+ 349               		.cfi_offset 6, -4
+ 350 00ea 7F92      		push r7
+ 351               	.LCFI12:
+ 352               		.cfi_def_cfa_offset 6
+ 353               		.cfi_offset 7, -5
+ 354 00ec 8F92      		push r8
+ 355               	.LCFI13:
+ 356               		.cfi_def_cfa_offset 7
+ 357               		.cfi_offset 8, -6
+ 358 00ee 9F92      		push r9
+ 359               	.LCFI14:
+ 360               		.cfi_def_cfa_offset 8
+ 361               		.cfi_offset 9, -7
+ 362 00f0 AF92      		push r10
+ 363               	.LCFI15:
+ 364               		.cfi_def_cfa_offset 9
+ 365               		.cfi_offset 10, -8
+ 366 00f2 BF92      		push r11
+ 367               	.LCFI16:
+ 368               		.cfi_def_cfa_offset 10
+ 369               		.cfi_offset 11, -9
+ 370 00f4 CF92      		push r12
+ 371               	.LCFI17:
+ 372               		.cfi_def_cfa_offset 11
+ 373               		.cfi_offset 12, -10
+ 374 00f6 DF92      		push r13
+ 375               	.LCFI18:
+ 376               		.cfi_def_cfa_offset 12
+ 377               		.cfi_offset 13, -11
+ 378 00f8 EF92      		push r14
+ 379               	.LCFI19:
+ 380               		.cfi_def_cfa_offset 13
+ 381               		.cfi_offset 14, -12
+ 382 00fa FF92      		push r15
+ 383               	.LCFI20:
+ 384               		.cfi_def_cfa_offset 14
+ 385               		.cfi_offset 15, -13
+ 386 00fc 0F93      		push r16
+ 387               	.LCFI21:
+ 388               		.cfi_def_cfa_offset 15
+ 389               		.cfi_offset 16, -14
+ 390 00fe 1F93      		push r17
+ 391               	.LCFI22:
+ 392               		.cfi_def_cfa_offset 16
+ 393               		.cfi_offset 17, -15
+ 394 0100 CF93      		push r28
+ 395               	.LCFI23:
+ 396               		.cfi_def_cfa_offset 17
+ 397               		.cfi_offset 28, -16
+ 398 0102 DF93      		push r29
+ 399               	.LCFI24:
+ 400               		.cfi_def_cfa_offset 18
+ 401               		.cfi_offset 29, -17
+ 402 0104 1F92      		push __zero_reg__
+ 403               	.LCFI25:
+ 404               		.cfi_def_cfa_offset 19
+ 405 0106 CDB7      		in r28,__SP_L__
+ 406 0108 DEB7      		in r29,__SP_H__
+ 407               	.LCFI26:
+ 408               		.cfi_def_cfa_register 28
+ 409               	/* prologue: function */
+ 410               	/* frame size = 1 */
+ 411               	/* stack size = 17 */
+ 412               	.L__stack_usage = 17
+ 413 010a 982F      		mov r25,r24
+ 414 010c 862F      		mov r24,r22
+ 415               	.LVL28:
+ 416 010e 842E      		mov r8,r20
+ 417 0110 6901      		movw r12,r18
+ 417:ks0108b.c     ****     uint8_t s;                          // Distance to edge of chip
+ 418:ks0108b.c     ****     uint8_t num_bytes1;                 // Side #1 number of bytes
+ 419:ks0108b.c     ****     uint8_t num_bytes2;                 // Side #2 number of bytes
+ 420:ks0108b.c     ****     uint16_t cs_select;                 // The cs_select bits
+ 421:ks0108b.c     **** 
+ 422:ks0108b.c     ****     // Set the y-position enable the display, write to both chips/pages
+ 423:ks0108b.c     ****     // concurrently.
+ 424:ks0108b.c     ****     set_y_position (y_row);             // Set row
+ 418               		.loc 1 424 0
+ 419 0112 9983      		std Y+1,r25
+ 420 0114 0E94 0000 		call set_y_position
+ 421               	.LVL29:
+ 425:ks0108b.c     **** 
+ 426:ks0108b.c     ****     // See if we are writing to the 2nd side only accounting for x being
+ 427:ks0108b.c     ****     // larger than 63
+ 428:ks0108b.c     ****     if (x >= 64)
+ 422               		.loc 1 428 0
+ 423 0118 9981      		ldd r25,Y+1
+ 424 011a 9034      		cpi r25,lo8(64)
+ 425 011c 00F0      		brlo .L24
+ 429:ks0108b.c     ****     {
+ 430:ks0108b.c     ****         x -= 64;                        // Normalise for chip
+ 426               		.loc 1 430 0
+ 427 011e 9054      		subi r25,lo8(-(-64))
+ 428               	.LVL30:
+ 431:ks0108b.c     **** 
+ 432:ks0108b.c     ****         // We are on the 2nd chip first so swap the lcd_read value
+ 433:ks0108b.c     ****         cs_select = CMD_CS1;
+ 429               		.loc 1 433 0
+ 430 0120 A12C      		mov r10,__zero_reg__
+ 431 0122 30E1      		ldi r19,lo8(16)
+ 432 0124 B32E      		mov r11,r19
+ 433 0126 00C0      		rjmp .L12
+ 434               	.LVL31:
+ 435               	.L24:
+ 434:ks0108b.c     ****     }
+ 435:ks0108b.c     ****     else
+ 436:ks0108b.c     ****     {
+ 437:ks0108b.c     ****         // We are on the first chip.
+ 438:ks0108b.c     ****         cs_select = CMD_CS2;
+ 436               		.loc 1 438 0
+ 437 0128 A12C      		mov r10,__zero_reg__
+ 438 012a 20E2      		ldi r18,lo8(32)
+ 439 012c B22E      		mov r11,r18
+ 440               	.LVL32:
+ 441               	.L12:
+ 439:ks0108b.c     ****     }
+ 440:ks0108b.c     **** 
+ 441:ks0108b.c     ****     s = 64 - x;                         // Distance to edge
+ 442               		.loc 1 441 0
+ 443 012e 80E4      		ldi r24,lo8(64)
+ 444 0130 891B      		sub r24,r25
+ 445               	.LVL33:
+ 442:ks0108b.c     ****     if (length > s)
+ 446               		.loc 1 442 0
+ 447 0132 8815      		cp r24,r8
+ 448 0134 00F4      		brsh .L25
+ 449               	.LVL34:
+ 443:ks0108b.c     ****     {
+ 444:ks0108b.c     ****         num_bytes1 = s;                 // How much to read in the first loop
+ 445:ks0108b.c     ****         num_bytes2 = length - s;        // How much to read in the second loop
+ 450               		.loc 1 445 0
+ 451 0136 782C      		mov r7,r8
+ 452 0138 781A      		sub r7,r24
+ 453               	.LVL35:
+ 454 013a 882E      		mov r8,r24
+ 455               	.LVL36:
+ 456 013c 00C0      		rjmp .L13
+ 457               	.LVL37:
+ 458               	.L25:
+ 446:ks0108b.c     ****     }
+ 447:ks0108b.c     ****     else
+ 448:ks0108b.c     ****     {
+ 449:ks0108b.c     ****         num_bytes1 = length;
+ 450:ks0108b.c     ****         num_bytes2 = 0;
+ 459               		.loc 1 450 0
+ 460 013e 712C      		mov r7,__zero_reg__
+ 461               	.LVL38:
+ 462               	.L13:
+ 463               	.LBB10:
+ 451:ks0108b.c     ****     }
+ 452:ks0108b.c     **** 
+ 453:ks0108b.c     ****     // Iterate over both sides, we compute the break condition in the loop.
+ 454:ks0108b.c     ****     for (;;)
+ 455:ks0108b.c     ****     {
+ 456:ks0108b.c     ****         // Set the column position.
+ 457:ks0108b.c     ****         ks0108b_write (CMD_COLUMN | cs_select | (x & 0x3f));
+ 458:ks0108b.c     **** 
+ 459:ks0108b.c     ****         // Perform a dummy read to transfer to register
+ 460:ks0108b.c     ****         ks0108b_read (CMD_READ | cs_select);
+ 461:ks0108b.c     **** 
+ 462:ks0108b.c     ****         // Loop for the number of bytes to be read.
+ 463:ks0108b.c     ****         do
+ 464:ks0108b.c     ****         {
+ 465:ks0108b.c     ****             uint8_t data;
+ 466:ks0108b.c     ****             uint8_t screen_data;
+ 467:ks0108b.c     **** 
+ 468:ks0108b.c     ****             // Read the data from the screen.
+ 469:ks0108b.c     ****             screen_data = ks0108b_read (CMD_READ | cs_select);
+ 470:ks0108b.c     ****             data = *buf;
+ 471:ks0108b.c     **** 
+ 472:ks0108b.c     ****             // Apply any reverse setting; if the reverse bit is set then
+ 473:ks0108b.c     ****             // we negate the data
+ 474:ks0108b.c     ****             if ((mode & MODE_NORMAL_MASK) == MODE_REVERSE)
+ 464               		.loc 1 474 0
+ 465 0140 4E2D      		mov r20,r14
+ 466 0142 4170      		andi r20,lo8(1)
+ 467 0144 F42E      		mov r15,r20
+ 475:ks0108b.c     ****                 screen_data = ~screen_data;
+ 476:ks0108b.c     **** 
+ 477:ks0108b.c     ****             // Perform the merge
+ 478:ks0108b.c     ****             if ((mode & MODE_OP_MASK) != 0)
+ 468               		.loc 1 478 0
+ 469 0146 1E2D      		mov r17,r14
+ 470 0148 1670      		andi r17,lo8(6)
+ 471               	.LBB11:
+ 472               	.LBB12:
+ 473               	.LBB13:
+ 474               	.LBB14:
+ 181:ks0108b.c     ****         if ((mode & MODE_XOR) != 0)
+ 475               		.loc 1 181 0
+ 476 014a 5E2D      		mov r21,r14
+ 477 014c 5470      		andi r21,lo8(4)
+ 478 014e E52E      		mov r14,r21
+ 479               	.LVL39:
+ 480               	.LBE14:
+ 481               	.LBE13:
+ 482               	.LBE12:
+ 483               	.LBE11:
+ 479:ks0108b.c     ****                 data = merge_column (data, screen_data, mode);
+ 480:ks0108b.c     **** 
+ 481:ks0108b.c     ****             // MODE_MERGE - Merge in the data in a copy mode
+ 482:ks0108b.c     ****             data = (data & mask) | (screen_data & ~mask);
+ 484               		.loc 1 482 0
+ 485 0150 902E      		mov r9,r16
+ 486 0152 9094      		com r9
+ 487               	.LVL40:
+ 488               	.L23:
+ 489               	.LBE10:
+ 457:ks0108b.c     ****         ks0108b_write (CMD_COLUMN | cs_select | (x & 0x3f));
+ 490               		.loc 1 457 0
+ 491 0154 9501      		movw r18,r10
+ 492 0156 2064      		ori r18,64
+ 493 0158 3860      		ori r19,8
+ 494 015a 9F73      		andi r25,lo8(63)
+ 495               	.LVL41:
+ 496 015c F901      		movw r30,r18
+ 497 015e E92B      		or r30,r25
+ 498 0160 CF01      		movw r24,r30
+ 499 0162 0E94 0000 		call ks0108b_write
+ 500               	.LVL42:
+ 460:ks0108b.c     ****         ks0108b_read (CMD_READ | cs_select);
+ 501               		.loc 1 460 0
+ 502 0166 FEE0      		ldi r31,14
+ 503 0168 BF2A      		or r11,r31
+ 504               	.LVL43:
+ 505 016a C501      		movw r24,r10
+ 506 016c 0E94 0000 		call ks0108b_read
+ 507               	.LVL44:
+ 508 0170 2601      		movw r4,r12
+ 509 0172 682C      		mov r6,r8
+ 510 0174 6C0C      		add r6,r12
+ 511               	.LVL45:
+ 512               	.L21:
+ 513               	.LBB19:
+ 469:ks0108b.c     ****             screen_data = ks0108b_read (CMD_READ | cs_select);
+ 514               		.loc 1 469 0
+ 515 0176 C501      		movw r24,r10
+ 516 0178 0E94 0000 		call ks0108b_read
+ 517               	.LVL46:
+ 470:ks0108b.c     ****             data = *buf;
+ 518               		.loc 1 470 0
+ 519 017c F201      		movw r30,r4
+ 520 017e 9081      		ld r25,Z
+ 521               	.LVL47:
+ 474:ks0108b.c     ****             if ((mode & MODE_NORMAL_MASK) == MODE_REVERSE)
+ 522               		.loc 1 474 0
+ 523 0180 F110      		cpse r15,__zero_reg__
+ 524 0182 00C0      		rjmp .L14
+ 475:ks0108b.c     ****                 screen_data = ~screen_data;
+ 525               		.loc 1 475 0
+ 526 0184 8095      		com r24
+ 527               	.LVL48:
+ 528               	.L14:
+ 478:ks0108b.c     ****             if ((mode & MODE_OP_MASK) != 0)
+ 529               		.loc 1 478 0
+ 530 0186 1123      		tst r17
+ 531 0188 01F0      		breq .L15
+ 532               	.LVL49:
+ 533               	.LBB18:
+ 534               	.LBB17:
+ 178:ks0108b.c     ****     if (mode >= MODE_XOR)
+ 535               		.loc 1 178 0
+ 536 018a 1430      		cpi r17,lo8(4)
+ 537 018c 00F0      		brlo .L16
+ 538               	.LVL50:
+ 539               	.LBB16:
+ 540               	.LBB15:
+ 181:ks0108b.c     ****         if ((mode & MODE_XOR) != 0)
+ 541               		.loc 1 181 0
+ 542 018e EE20      		tst r14
+ 543 0190 01F0      		breq .L17
+ 184:ks0108b.c     ****             new_column ^= orig_column;
+ 544               		.loc 1 184 0
+ 545 0192 9827      		eor r25,r24
+ 546               	.LVL51:
+ 547 0194 00C0      		rjmp .L15
+ 548               	.LVL52:
+ 549               	.L17:
+ 189:ks0108b.c     ****             new_column = ~new_column & orig_column;
+ 550               		.loc 1 189 0
+ 551 0196 9095      		com r25
+ 552               	.LVL53:
+ 553 0198 9823      		and r25,r24
+ 554               	.LVL54:
+ 555 019a 00C0      		rjmp .L15
+ 556               	.LVL55:
+ 557               	.L16:
+ 558               	.LBE15:
+ 559               	.LBE16:
+ 195:ks0108b.c     ****         new_column |= orig_column;
+ 560               		.loc 1 195 0
+ 561 019c 982B      		or r25,r24
+ 562               	.LVL56:
+ 563               	.L15:
+ 564               	.LBE17:
+ 565               	.LBE18:
+ 566               		.loc 1 482 0
+ 567 019e 9023      		and r25,r16
+ 568               	.LVL57:
+ 569 01a0 8921      		and r24,r9
+ 570               	.LVL58:
+ 571 01a2 982B      		or r25,r24
+ 572               	.LVL59:
+ 483:ks0108b.c     **** 
+ 484:ks0108b.c     ****             // Assign the data to the buffer.
+ 485:ks0108b.c     ****             *buf++ = data;
+ 573               		.loc 1 485 0
+ 574 01a4 F201      		movw r30,r4
+ 575 01a6 9193      		st Z+,r25
+ 576               	.LVL60:
+ 577 01a8 2F01      		movw r4,r30
+ 578               	.LVL61:
+ 579               	.LBE19:
+ 486:ks0108b.c     ****         }
+ 487:ks0108b.c     ****         while (--num_bytes1 > 0);
+ 580               		.loc 1 487 0
+ 581 01aa 6E12      		cpse r6,r30
+ 582 01ac 00C0      		rjmp .L21
+ 583 01ae 8A94      		dec r8
+ 584               	.LVL62:
+ 585 01b0 482D      		mov r20,r8
+ 586 01b2 50E0      		ldi r21,0
+ 587 01b4 4F5F      		subi r20,-1
+ 588 01b6 5F4F      		sbci r21,-1
+ 589 01b8 C40E      		add r12,r20
+ 590 01ba D51E      		adc r13,r21
+ 591               	.LVL63:
+ 488:ks0108b.c     **** 
+ 489:ks0108b.c     ****         // See if we have finished.
+ 490:ks0108b.c     ****         if ((num_bytes1 = num_bytes2) == 0)
+ 592               		.loc 1 490 0
+ 593 01bc 7720      		tst r7
+ 594 01be 01F0      		breq .L11
+ 491:ks0108b.c     ****             break;
+ 492:ks0108b.c     **** 
+ 493:ks0108b.c     ****         /* Set up for the next loop */
+ 494:ks0108b.c     ****         num_bytes1 = num_bytes2;        // Set up for num_bytes1
+ 495:ks0108b.c     ****         num_bytes2 = 0;                 // Terminate on next loop
+ 496:ks0108b.c     **** 
+ 497:ks0108b.c     ****         // Select proper chip we move to the other one, this catches any
+ 498:ks0108b.c     ****         // overrun from previous side.
+ 499:ks0108b.c     ****         cs_select = CMD_CS1;
+ 500:ks0108b.c     **** 
+ 501:ks0108b.c     ****         // We have swapped chips so we will start from column 0.
+ 502:ks0108b.c     ****         x = 0;
+ 595               		.loc 1 502 0
+ 596 01c0 90E0      		ldi r25,0
+ 597               	.LVL64:
+ 499:ks0108b.c     ****         cs_select = CMD_CS1;
+ 598               		.loc 1 499 0
+ 599 01c2 A12C      		mov r10,__zero_reg__
+ 600 01c4 80E1      		ldi r24,lo8(16)
+ 601 01c6 B82E      		mov r11,r24
+ 494:ks0108b.c     ****         num_bytes1 = num_bytes2;        // Set up for num_bytes1
+ 602               		.loc 1 494 0
+ 603 01c8 872C      		mov r8,r7
+ 495:ks0108b.c     ****         num_bytes2 = 0;                 // Terminate on next loop
+ 604               		.loc 1 495 0
+ 605 01ca 712C      		mov r7,__zero_reg__
+ 606               	.LVL65:
+ 607 01cc 00C0      		rjmp .L23
+ 608               	.LVL66:
+ 609               	.L11:
+ 610               	/* epilogue start */
+ 503:ks0108b.c     ****     }
+ 504:ks0108b.c     **** }
+ 611               		.loc 1 504 0
+ 612 01ce 0F90      		pop __tmp_reg__
+ 613 01d0 DF91      		pop r29
+ 614 01d2 CF91      		pop r28
+ 615 01d4 1F91      		pop r17
+ 616 01d6 0F91      		pop r16
+ 617               	.LVL67:
+ 618 01d8 FF90      		pop r15
+ 619 01da EF90      		pop r14
+ 620 01dc DF90      		pop r13
+ 621 01de CF90      		pop r12
+ 622 01e0 BF90      		pop r11
+ 623 01e2 AF90      		pop r10
+ 624 01e4 9F90      		pop r9
+ 625               	.LVL68:
+ 626 01e6 8F90      		pop r8
+ 627 01e8 7F90      		pop r7
+ 628               	.LVL69:
+ 629 01ea 6F90      		pop r6
+ 630 01ec 5F90      		pop r5
+ 631 01ee 4F90      		pop r4
+ 632 01f0 0895      		ret
+ 633               		.cfi_endproc
+ 634               	.LFE16:
+ 636               	.global	write_block
+ 638               	write_block:
+ 639               	.LFB17:
+ 505:ks0108b.c     **** 
+ 506:ks0108b.c     **** /////////////////////////////////////////////////////////////////////////////
+ 507:ks0108b.c     **** /// Write a row to the display.
+ 508:ks0108b.c     **** /// The row is written colum wise where x will start at (x & 0xf8)
+ 509:ks0108b.c     **** ///
+ 510:ks0108b.c     **** /// @param [in] x The column to write
+ 511:ks0108b.c     **** /// @param [in] y_row The row to read (y % 8).
+ 512:ks0108b.c     **** /// @param [in] length The number of columns to read.
+ 513:ks0108b.c     **** /// @param [in] buf Location to write from.
+ 514:ks0108b.c     **** /// @param [in] mode The merge mode required.
+ 515:ks0108b.c     **** ///
+ 516:ks0108b.c     **** void
+ 517:ks0108b.c     **** write_block (uint8_t x, uint8_t y_row, uint8_t length, uint8_t *buf, uint8_t mode)
+ 518:ks0108b.c     **** {
+ 640               		.loc 1 518 0
+ 641               		.cfi_startproc
+ 642               	.LVL70:
+ 643 01f2 8F92      		push r8
+ 644               	.LCFI27:
+ 645               		.cfi_def_cfa_offset 3
+ 646               		.cfi_offset 8, -2
+ 647 01f4 9F92      		push r9
+ 648               	.LCFI28:
+ 649               		.cfi_def_cfa_offset 4
+ 650               		.cfi_offset 9, -3
+ 651 01f6 AF92      		push r10
+ 652               	.LCFI29:
+ 653               		.cfi_def_cfa_offset 5
+ 654               		.cfi_offset 10, -4
+ 655 01f8 BF92      		push r11
+ 656               	.LCFI30:
+ 657               		.cfi_def_cfa_offset 6
+ 658               		.cfi_offset 11, -5
+ 659 01fa CF92      		push r12
+ 660               	.LCFI31:
+ 661               		.cfi_def_cfa_offset 7
+ 662               		.cfi_offset 12, -6
+ 663 01fc DF92      		push r13
+ 664               	.LCFI32:
+ 665               		.cfi_def_cfa_offset 8
+ 666               		.cfi_offset 13, -7
+ 667 01fe EF92      		push r14
+ 668               	.LCFI33:
+ 669               		.cfi_def_cfa_offset 9
+ 670               		.cfi_offset 14, -8
+ 671 0200 FF92      		push r15
+ 672               	.LCFI34:
+ 673               		.cfi_def_cfa_offset 10
+ 674               		.cfi_offset 15, -9
+ 675 0202 0F93      		push r16
+ 676               	.LCFI35:
+ 677               		.cfi_def_cfa_offset 11
+ 678               		.cfi_offset 16, -10
+ 679 0204 1F93      		push r17
+ 680               	.LCFI36:
+ 681               		.cfi_def_cfa_offset 12
+ 682               		.cfi_offset 17, -11
+ 683 0206 CF93      		push r28
+ 684               	.LCFI37:
+ 685               		.cfi_def_cfa_offset 13
+ 686               		.cfi_offset 28, -12
+ 687 0208 DF93      		push r29
+ 688               	.LCFI38:
+ 689               		.cfi_def_cfa_offset 14
+ 690               		.cfi_offset 29, -13
+ 691 020a 1F92      		push __zero_reg__
+ 692               	.LCFI39:
+ 693               		.cfi_def_cfa_offset 15
+ 694 020c CDB7      		in r28,__SP_L__
+ 695 020e DEB7      		in r29,__SP_H__
+ 696               	.LCFI40:
+ 697               		.cfi_def_cfa_register 28
+ 698               	/* prologue: function */
+ 699               	/* frame size = 1 */
+ 700               	/* stack size = 13 */
+ 701               	.L__stack_usage = 13
+ 702 0210 982F      		mov r25,r24
+ 703 0212 862F      		mov r24,r22
+ 704               	.LVL71:
+ 705 0214 D42E      		mov r13,r20
+ 706 0216 4901      		movw r8,r18
+ 707 0218 B02E      		mov r11,r16
+ 519:ks0108b.c     ****     uint8_t s;                          // Distance to edge of chip
+ 520:ks0108b.c     ****     uint8_t num_bytes1;                 // Side #1 number of bytes
+ 521:ks0108b.c     ****     uint8_t num_bytes2;                 // Side #2 number of bytes
+ 522:ks0108b.c     ****     uint16_t cs_select;                 // The cs_select bits
+ 523:ks0108b.c     **** 
+ 524:ks0108b.c     ****     // Set the y-position enable the display, write to both chips/pages
+ 525:ks0108b.c     ****     // concurrently.
+ 526:ks0108b.c     ****     set_y_position (y_row);             // Set row
+ 708               		.loc 1 526 0
+ 709 021a 9983      		std Y+1,r25
+ 710 021c 0E94 0000 		call set_y_position
+ 711               	.LVL72:
+ 527:ks0108b.c     **** 
+ 528:ks0108b.c     ****     // See if we are writing to the 2nd side only accounting for x being
+ 529:ks0108b.c     ****     // larger than 63
+ 530:ks0108b.c     ****     if (x >= 64)
+ 712               		.loc 1 530 0
+ 713 0220 9981      		ldd r25,Y+1
+ 714 0222 9034      		cpi r25,lo8(64)
+ 715 0224 00F0      		brlo .L37
+ 531:ks0108b.c     ****     {
+ 532:ks0108b.c     ****         x -= 64;                        // Normalise for chip
+ 716               		.loc 1 532 0
+ 717 0226 9054      		subi r25,lo8(-(-64))
+ 718               	.LVL73:
+ 533:ks0108b.c     **** 
+ 534:ks0108b.c     ****         // We are on the 2nd chip first so swap the lcd_read value
+ 535:ks0108b.c     ****         cs_select = CMD_CS1;
+ 719               		.loc 1 535 0
+ 720 0228 00E0      		ldi r16,0
+ 721 022a 10E1      		ldi r17,lo8(16)
+ 722               	.LVL74:
+ 723 022c 00C0      		rjmp .L30
+ 724               	.LVL75:
+ 725               	.L37:
+ 536:ks0108b.c     ****     }
+ 537:ks0108b.c     ****     else
+ 538:ks0108b.c     ****     {
+ 539:ks0108b.c     ****         // We are on the first chip.
+ 540:ks0108b.c     ****         cs_select = CMD_CS2;
+ 726               		.loc 1 540 0
+ 727 022e 00E0      		ldi r16,0
+ 728 0230 10E2      		ldi r17,lo8(32)
+ 729               	.LVL76:
+ 730               	.L30:
+ 541:ks0108b.c     ****     }
+ 542:ks0108b.c     **** 
+ 543:ks0108b.c     ****     s = 64 - x;                         // Distance to edge
+ 731               		.loc 1 543 0
+ 732 0232 80E4      		ldi r24,lo8(64)
+ 733 0234 891B      		sub r24,r25
+ 734               	.LVL77:
+ 544:ks0108b.c     ****     if (length > s)
+ 735               		.loc 1 544 0
+ 736 0236 8D15      		cp r24,r13
+ 737 0238 00F4      		brsh .L38
+ 738               	.LVL78:
+ 545:ks0108b.c     ****     {
+ 546:ks0108b.c     ****         num_bytes1 = s;                 // How much to read in the first loop
+ 547:ks0108b.c     ****         num_bytes2 = length - s;        // How much to read in the second loop
+ 739               		.loc 1 547 0
+ 740 023a CD2C      		mov r12,r13
+ 741 023c C81A      		sub r12,r24
+ 742               	.LVL79:
+ 743 023e D82E      		mov r13,r24
+ 744               	.LVL80:
+ 745 0240 00C0      		rjmp .L31
+ 746               	.LVL81:
+ 747               	.L38:
+ 548:ks0108b.c     ****     }
+ 549:ks0108b.c     ****     else
+ 550:ks0108b.c     ****     {
+ 551:ks0108b.c     ****         num_bytes1 = length;
+ 552:ks0108b.c     ****         num_bytes2 = 0;
+ 748               		.loc 1 552 0
+ 749 0242 C12C      		mov r12,__zero_reg__
+ 750               	.LVL82:
+ 751               	.L31:
+ 752               	.LBB20:
+ 553:ks0108b.c     ****     }
+ 554:ks0108b.c     **** 
+ 555:ks0108b.c     ****     // Iterate over both sides, we compute the break condition in the loop.
+ 556:ks0108b.c     ****     for (;;)
+ 557:ks0108b.c     ****     {
+ 558:ks0108b.c     ****         // Set the column position.
+ 559:ks0108b.c     ****         ks0108b_write (CMD_COLUMN | cs_select | (x & 0x3f));
+ 560:ks0108b.c     **** 
+ 561:ks0108b.c     ****         // Loop for the number of bytes to be written.
+ 562:ks0108b.c     ****         do
+ 563:ks0108b.c     ****         {
+ 564:ks0108b.c     ****             uint8_t data;
+ 565:ks0108b.c     **** 
+ 566:ks0108b.c     ****             // Get the data from the buffer
+ 567:ks0108b.c     ****             data = *buf++;
+ 568:ks0108b.c     **** 
+ 569:ks0108b.c     ****             // Perform a reverse if required.
+ 570:ks0108b.c     ****             if ((mode & MODE_NORMAL_MASK) == MODE_REVERSE)
+ 753               		.loc 1 570 0
+ 754 0244 2B2D      		mov r18,r11
+ 755 0246 2170      		andi r18,lo8(1)
+ 756 0248 B22E      		mov r11,r18
+ 757               	.LVL83:
+ 758               	.L36:
+ 759               	.LBE20:
+ 559:ks0108b.c     ****         ks0108b_write (CMD_COLUMN | cs_select | (x & 0x3f));
+ 760               		.loc 1 559 0
+ 761 024a 9801      		movw r18,r16
+ 762 024c 2064      		ori r18,64
+ 763 024e 3860      		ori r19,8
+ 764 0250 9F73      		andi r25,lo8(63)
+ 765               	.LVL84:
+ 766 0252 A901      		movw r20,r18
+ 767 0254 492B      		or r20,r25
+ 768 0256 CA01      		movw r24,r20
+ 769 0258 0E94 0000 		call ks0108b_write
+ 770               	.LVL85:
+ 771 025c 7401      		movw r14,r8
+ 772               	.LBB21:
+ 571:ks0108b.c     ****                 data = ~data;
+ 572:ks0108b.c     **** 
+ 573:ks0108b.c     ****             // Write the data to the screen.
+ 574:ks0108b.c     ****             ks0108b_write (CMD_WRITE | cs_select | data);
+ 773               		.loc 1 574 0
+ 774 025e 1A60      		ori r17,10
+ 775               	.LVL86:
+ 776 0260 A82C      		mov r10,r8
+ 777 0262 AD0C      		add r10,r13
+ 778               	.LVL87:
+ 779               	.L34:
+ 567:ks0108b.c     ****             data = *buf++;
+ 780               		.loc 1 567 0
+ 781 0264 F701      		movw r30,r14
+ 782 0266 8191      		ld r24,Z+
+ 783               	.LVL88:
+ 784 0268 7F01      		movw r14,r30
+ 785               	.LVL89:
+ 570:ks0108b.c     ****             if ((mode & MODE_NORMAL_MASK) == MODE_REVERSE)
+ 786               		.loc 1 570 0
+ 787 026a B110      		cpse r11,__zero_reg__
+ 788 026c 00C0      		rjmp .L32
+ 571:ks0108b.c     ****                 data = ~data;
+ 789               		.loc 1 571 0
+ 790 026e 8095      		com r24
+ 791               	.LVL90:
+ 792               	.L32:
+ 793               		.loc 1 574 0
+ 794 0270 9801      		movw r18,r16
+ 795 0272 282B      		or r18,r24
+ 796 0274 C901      		movw r24,r18
+ 797               	.LVL91:
+ 798 0276 0E94 0000 		call ks0108b_write
+ 799               	.LVL92:
+ 800               	.LBE21:
+ 575:ks0108b.c     ****         }
+ 576:ks0108b.c     ****         while (--num_bytes1 > 0);
+ 801               		.loc 1 576 0
+ 802 027a AE10      		cpse r10,r14
+ 803 027c 00C0      		rjmp .L34
+ 804 027e DA94      		dec r13
+ 805               	.LVL93:
+ 806 0280 4D2D      		mov r20,r13
+ 807 0282 50E0      		ldi r21,0
+ 808 0284 4F5F      		subi r20,-1
+ 809 0286 5F4F      		sbci r21,-1
+ 810 0288 840E      		add r8,r20
+ 811 028a 951E      		adc r9,r21
+ 812               	.LVL94:
+ 577:ks0108b.c     **** 
+ 578:ks0108b.c     ****         // See if we have finished.
+ 579:ks0108b.c     ****         if ((num_bytes1 = num_bytes2) == 0)
+ 813               		.loc 1 579 0
+ 814 028c CC20      		tst r12
+ 815 028e 01F0      		breq .L29
+ 580:ks0108b.c     ****             break;
+ 581:ks0108b.c     **** 
+ 582:ks0108b.c     ****         /* Set up for the next loop */
+ 583:ks0108b.c     ****         num_bytes1 = num_bytes2;        // Set up for num_bytes1
+ 584:ks0108b.c     ****         num_bytes2 = 0;                 // Terminate on next loop
+ 585:ks0108b.c     **** 
+ 586:ks0108b.c     ****         // Select proper chip we move to the other one, this catches any
+ 587:ks0108b.c     ****         // overrun from previous side.
+ 588:ks0108b.c     ****         cs_select = CMD_CS1;
+ 589:ks0108b.c     **** 
+ 590:ks0108b.c     ****         // We have swapped chips so we will start from column 0.
+ 591:ks0108b.c     ****         x = 0;
+ 816               		.loc 1 591 0
+ 817 0290 90E0      		ldi r25,0
+ 588:ks0108b.c     ****         cs_select = CMD_CS1;
+ 818               		.loc 1 588 0
+ 819 0292 00E0      		ldi r16,0
+ 820 0294 10E1      		ldi r17,lo8(16)
+ 583:ks0108b.c     ****         num_bytes1 = num_bytes2;        // Set up for num_bytes1
+ 821               		.loc 1 583 0
+ 822 0296 DC2C      		mov r13,r12
+ 584:ks0108b.c     ****         num_bytes2 = 0;                 // Terminate on next loop
+ 823               		.loc 1 584 0
+ 824 0298 C12C      		mov r12,__zero_reg__
+ 825               	.LVL95:
+ 826 029a 00C0      		rjmp .L36
+ 827               	.LVL96:
+ 828               	.L29:
+ 829               	/* epilogue start */
+ 592:ks0108b.c     ****     }
+ 593:ks0108b.c     **** }
+ 830               		.loc 1 593 0
+ 831 029c 0F90      		pop __tmp_reg__
+ 832 029e DF91      		pop r29
+ 833 02a0 CF91      		pop r28
+ 834 02a2 1F91      		pop r17
+ 835 02a4 0F91      		pop r16
+ 836 02a6 FF90      		pop r15
+ 837 02a8 EF90      		pop r14
+ 838               	.LVL97:
+ 839 02aa DF90      		pop r13
+ 840 02ac CF90      		pop r12
+ 841               	.LVL98:
+ 842 02ae BF90      		pop r11
+ 843 02b0 AF90      		pop r10
+ 844 02b2 9F90      		pop r9
+ 845 02b4 8F90      		pop r8
+ 846 02b6 0895      		ret
+ 847               		.cfi_endproc
+ 848               	.LFE17:
+ 850               	.global	ks0108b_init
+ 852               	ks0108b_init:
+ 853               	.LFB18:
+ 594:ks0108b.c     **** 
+ 595:ks0108b.c     **** ////////////////////////////////////////////////////////////////////////////////////
+ 596:ks0108b.c     **** /// First unitialisation of the device. Set up the display hardware.
+ 597:ks0108b.c     **** ///
+ 598:ks0108b.c     **** void
+ 599:ks0108b.c     **** ks0108b_init (void)
+ 600:ks0108b.c     **** {
+ 854               		.loc 1 600 0
+ 855               		.cfi_startproc
+ 856               	/* prologue: function */
+ 857               	/* frame size = 0 */
+ 858               	/* stack size = 0 */
+ 859               	.L__stack_usage = 0
+ 601:ks0108b.c     ****     // Set up the screen size.
+ 602:ks0108b.c     ****     x_dim = SCREEN_WIDTH;
+ 860               		.loc 1 602 0
+ 861 02b8 80E8      		ldi r24,lo8(-128)
+ 862 02ba 8093 0000 		sts x_dim,r24
+ 603:ks0108b.c     ****     y_dim = SCREEN_HEIGHT;
+ 863               		.loc 1 603 0
+ 864 02be 80E4      		ldi r24,lo8(64)
+ 865 02c0 8093 0000 		sts y_dim,r24
+ 604:ks0108b.c     **** 
+ 605:ks0108b.c     ****     // Perform a chip reset; with ^RESet low then the chip should reset.
+ 606:ks0108b.c     ****     PORTC = (1 << RW);
+ 866               		.loc 1 606 0
+ 867 02c4 84E0      		ldi r24,lo8(4)
+ 868 02c6 88B9      		out 0x8,r24
+ 607:ks0108b.c     ****     // Enable the outputs
+ 608:ks0108b.c     ****     DDRC = ((1 << EN) | (1 << RS) | (1 << RW) | (1 << RES) | (1 << CS1) | (1 << CS2));
+ 869               		.loc 1 608 0
+ 870 02c8 8FE3      		ldi r24,lo8(63)
+ 871 02ca 87B9      		out 0x7,r24
+ 872               	.LVL99:
+ 873               	.LBB22:
+ 874               	.LBB23:
+ 875               		.file 2 "/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h"
+   1:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /* Copyright (c) 2002, Marek Michalkiewicz
+   2:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Copyright (c) 2004,2005,2007 Joerg Wunsch
+   3:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Copyright (c) 2007  Florin-Viorel Petrov
+   4:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    All rights reserved.
+   5:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+   6:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Redistribution and use in source and binary forms, with or without
+   7:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    modification, are permitted provided that the following conditions are met:
+   8:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+   9:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    * Redistributions of source code must retain the above copyright
+  10:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      notice, this list of conditions and the following disclaimer.
+  11:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  12:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    * Redistributions in binary form must reproduce the above copyright
+  13:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      notice, this list of conditions and the following disclaimer in
+  14:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      the documentation and/or other materials provided with the
+  15:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      distribution.
+  16:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  17:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    * Neither the name of the copyright holders nor the names of
+  18:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      contributors may be used to endorse or promote products derived
+  19:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****      from this software without specific prior written permission.
+  20:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  21:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  22:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  23:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  24:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+  25:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  26:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  27:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  28:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  29:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  30:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  31:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   POSSIBILITY OF SUCH DAMAGE. */
+  32:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  33:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /* $Id$ */
+  34:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  35:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #ifndef _UTIL_DELAY_H_
+  36:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #define _UTIL_DELAY_H_ 1
+  37:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  38:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #ifndef __HAS_DELAY_CYCLES
+  39:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #define __HAS_DELAY_CYCLES 1
+  40:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+  41:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  42:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #include <inttypes.h>
+  43:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #include <util/delay_basic.h>
+  44:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #include <math.h>
+  45:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  46:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /** \file */
+  47:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /** \defgroup util_delay <util/delay.h>: Convenience functions for busy-wait delay loops
+  48:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     \code
+  49:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     #define F_CPU 1000000UL  // 1 MHz
+  50:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     //#define F_CPU 14.7456E6
+  51:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     #include <util/delay.h>
+  52:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     \endcode
+  53:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  54:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     \note As an alternative method, it is possible to pass the
+  55:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     F_CPU macro down to the compiler from the Makefile.
+  56:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     Obviously, in that case, no \c \#define statement should be
+  57:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     used.
+  58:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  59:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     The functions in this header file are wrappers around the basic
+  60:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     busy-wait functions from <util/delay_basic.h>.  They are meant as
+  61:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     convenience functions where actual time values can be specified
+  62:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     rather than a number of cycles to wait for.  The idea behind is
+  63:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     that compile-time constant expressions will be eliminated by
+  64:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     compiler optimization so floating-point expressions can be used
+  65:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     to calculate the number of delay cycles needed based on the CPU
+  66:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     frequency passed by the macro F_CPU.
+  67:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  68:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     \note In order for these functions to work as intended, compiler
+  69:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     optimizations <em>must</em> be enabled, and the delay time
+  70:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     <em>must</em> be an expression that is a known constant at
+  71:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     compile-time.  If these requirements are not met, the resulting
+  72:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     delay will be much longer (and basically unpredictable), and
+  73:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     applications that otherwise do not use floating-point calculations
+  74:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     will experience severe code bloat by the floating-point library
+  75:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     routines linked into the application.
+  76:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  77:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     The functions available allow the specification of microsecond, and
+  78:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     millisecond delays directly, using the application-supplied macro
+  79:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     F_CPU as the CPU clock frequency (in Hertz).
+  80:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  81:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** */
+  82:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  83:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #if !defined(__DOXYGEN__)
+  84:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** static inline void _delay_us(double __us) __attribute__((always_inline));
+  85:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** static inline void _delay_ms(double __ms) __attribute__((always_inline));
+  86:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+  87:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  88:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #ifndef F_CPU
+  89:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /* prevent compiler error by supplying a default */
+  90:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** # warning "F_CPU not defined for <util/delay.h>"
+  91:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** # define F_CPU 1000000UL
+  92:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+  93:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  94:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #ifndef __OPTIMIZE__
+  95:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** # warning "Compiler optimizations disabled; functions from <util/delay.h> won't work as designed"
+  96:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+  97:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+  98:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+  99:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 100:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 101:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #  include <math.h>
+ 102:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #endif
+ 103:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 104:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** /**
+ 105:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    \ingroup util_delay
+ 106:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 107:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Perform a delay of \c __ms milliseconds, using _delay_loop_2().
+ 108:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 109:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    The macro F_CPU is supposed to be defined to a
+ 110:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    constant defining the CPU clock frequency (in Hertz).
+ 111:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 112:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    The maximal possible delay is 262.14 ms / F_CPU in MHz.
+ 113:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 114:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    When the user request delay which exceed the maximum possible one,
+ 115:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    _delay_ms() provides a decreased resolution functionality. In this
+ 116:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    mode _delay_ms() will work with a resolution of 1/10 ms, providing
+ 117:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    delays up to 6.5535 seconds (independent from CPU frequency).  The
+ 118:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    user will not be informed about decreased resolution.
+ 119:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 120:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    If the avr-gcc toolchain has __builtin_avr_delay_cycles(unsigned long)
+ 121:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    support, maximal possible delay is 4294967.295 ms/ F_CPU in MHz. For
+ 122:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    values greater than the maximal possible delay, overflows results in
+ 123:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    no delay i.e., 0ms.
+ 124:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 125:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Conversion of __us into clock cycles may not always result in integer.
+ 126:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    By default, the clock cycles rounded up to next integer. This ensures that
+ 127:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    the user gets atleast __us microseconds of delay.
+ 128:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 129:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Alternatively, user can define __DELAY_ROUND_DOWN__ and __DELAY_ROUND_CLOSEST__
+ 130:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    to round down and round to closest integer.
+ 131:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 132:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Note: The new implementation of _delay_ms(double __ms) with 
+ 133:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****     __builtin_avr_delay_cycles(unsigned long) support is not backward compatible. 
+ 134:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    User can define __DELAY_BACKWARD_COMPATIBLE__ to get a backward compatible delay.
+ 135:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    Also, the backward compatible
+ 136:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    algorithm will be chosen if the code is compiled in a <em>freestanding
+ 137:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    environment</em> (GCC option \c -ffreestanding), as the math functions
+ 138:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****    required for rounding are not available to the compiler then.
+ 139:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 140:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****  */
+ 141:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** void
+ 142:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** _delay_ms(double __ms)
+ 143:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** {
+ 144:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	double __tmp ; 
+ 145:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+ 146:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 147:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 148:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	uint32_t __ticks_dc;
+ 149:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	extern void __builtin_avr_delay_cycles(unsigned long);
+ 150:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__tmp = ((F_CPU) / 1e3) * __ms;
+ 151:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 152:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#if defined(__DELAY_ROUND_DOWN__)
+ 153:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)fabs(__tmp);
+ 154:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 155:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#elif defined(__DELAY_ROUND_CLOSEST__)
+ 156:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(fabs(__tmp)+0.5);
+ 157:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 158:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#else
+ 159:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		//round up by default
+ 160:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(ceil(fabs(__tmp)));
+ 161:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	#endif
+ 162:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 
+ 163:/usr/local/CrossPack-AVR-20131216/avr/include/util/delay.h **** 	__builtin_avr_delay_cycles(__ticks_dc);
+ 876               		.loc 2 163 0
+ 877 02cc 2FEF      		ldi r18,lo8(191999)
+ 878 02ce 8DEE      		ldi r24,hi8(191999)
+ 879 02d0 92E0      		ldi r25,hlo8(191999)
+ 880 02d2 2150      		1: subi r18,1
+ 881 02d4 8040      		sbci r24,0
+ 882 02d6 9040      		sbci r25,0
+ 883 02d8 01F4      		brne 1b
+ 884 02da 00C0      		rjmp .
+ 885 02dc 0000      		nop
+ 886               	.LBE23:
+ 887               	.LBE22:
+ 609:ks0108b.c     ****     _delay_ms (60);
+ 610:ks0108b.c     ****     PORTC |= (1 << RES);
+ 888               		.loc 1 610 0
+ 889 02de 439A      		sbi 0x8,3
+ 611:ks0108b.c     **** 
+ 612:ks0108b.c     ****     // Enable the display
+ 613:ks0108b.c     ****     ks0108b_write (CMD_DISPLAY_ON);         // Set up data on lines
+ 890               		.loc 1 613 0
+ 891 02e0 8FE3      		ldi r24,lo8(63)
+ 892 02e2 98E3      		ldi r25,lo8(56)
+ 893 02e4 0E94 0000 		call ks0108b_write
+ 894               	.LVL100:
+ 614:ks0108b.c     **** 
+ 615:ks0108b.c     ****     // Reset the column cache position.
+ 616:ks0108b.c     ****     y_row = 0xff;
+ 895               		.loc 1 616 0
+ 896 02e8 8FEF      		ldi r24,lo8(-1)
+ 897 02ea 8093 0000 		sts y_row,r24
+ 898 02ee 0895      		ret
+ 899               		.cfi_endproc
+ 900               	.LFE18:
+ 902               	.global	ks0108b_screen_clear
+ 904               	ks0108b_screen_clear:
+ 905               	.LFB19:
+ 617:ks0108b.c     **** }
+ 618:ks0108b.c     **** 
+ 619:ks0108b.c     **** /////////////////////////////////////////////////////////////////////////////
+ 620:ks0108b.c     **** /// Clearing the display. All we're *really* doing is writing a one or zero
+ 621:ks0108b.c     **** /// to all the memory locations for the display.
+ 622:ks0108b.c     **** ///
+ 623:ks0108b.c     **** /// @param [in] mode The mode to clear the screen
+ 624:ks0108b.c     **** ///                  0x00 MODE_REVERSE - clears with 1's
+ 625:ks0108b.c     **** ///                  0x01 MODE_NORMAL  - clears with 0's
+ 626:ks0108b.c     **** void
+ 627:ks0108b.c     **** ks0108b_screen_clear (uint8_t mode)
+ 628:ks0108b.c     **** {
+ 906               		.loc 1 628 0
+ 907               		.cfi_startproc
+ 908               	.LVL101:
+ 909 02f0 0F93      		push r16
+ 910               	.LCFI41:
+ 911               		.cfi_def_cfa_offset 3
+ 912               		.cfi_offset 16, -2
+ 913 02f2 1F93      		push r17
+ 914               	.LCFI42:
+ 915               		.cfi_def_cfa_offset 4
+ 916               		.cfi_offset 17, -3
+ 917 02f4 CF93      		push r28
+ 918               	.LCFI43:
+ 919               		.cfi_def_cfa_offset 5
+ 920               		.cfi_offset 28, -4
+ 921 02f6 DF93      		push r29
+ 922               	.LCFI44:
+ 923               		.cfi_def_cfa_offset 6
+ 924               		.cfi_offset 29, -5
+ 925               	/* prologue: function */
+ 926               	/* frame size = 0 */
+ 927               	/* stack size = 4 */
+ 928               	.L__stack_usage = 4
+ 629:ks0108b.c     ****     uint8_t data;                       // The data to write to screen.
+ 630:ks0108b.c     ****     uint8_t yy;                         // The y coordinate.
+ 631:ks0108b.c     **** 
+ 632:ks0108b.c     ****     // Determine if the screen is reversed or not. In normal mode we write
+ 633:ks0108b.c     ****     // 0x00 when reversed we write 0xff. Note: 0x00-0x01 = 0xff !!
+ 634:ks0108b.c     ****     data = (mode & MODE_NORMAL_MASK) - 1;
+ 929               		.loc 1 634 0
+ 930 02f8 8170      		andi r24,lo8(1)
+ 931               	.LVL102:
+ 932 02fa 8150      		subi r24,lo8(-(-1))
+ 933               	.LVL103:
+ 635:ks0108b.c     **** 
+ 636:ks0108b.c     ****     // Iterate over all of the rows.
+ 637:ks0108b.c     ****     for (yy = 0; yy < SCREEN_ROWS; yy++)
+ 934               		.loc 1 637 0
+ 935 02fc 10E0      		ldi r17,0
+ 936               	.LBB24:
+ 638:ks0108b.c     ****     {
+ 639:ks0108b.c     ****         uint8_t xx;                     // The x coordinate.
+ 640:ks0108b.c     **** 
+ 641:ks0108b.c     ****         // Set the row and column on both chips. We write to both chips at
+ 642:ks0108b.c     ****         // the same time to speed up the screen clear
+ 643:ks0108b.c     ****         set_y_position (yy);            // Set row
+ 644:ks0108b.c     ****         ks0108b_write(CMD_COLUMN|CMD_CS12); // Set column
+ 645:ks0108b.c     **** 
+ 646:ks0108b.c     ****         // Write the data
+ 647:ks0108b.c     ****         for (xx = 0; xx < SCREEN_PAGE; xx++)
+ 648:ks0108b.c     ****             ks0108b_write (CMD_WRITE | CMD_CS12 | data);
+ 937               		.loc 1 648 0
+ 938 02fe C82F      		mov r28,r24
+ 939 0300 D0E0      		ldi r29,0
+ 940 0302 DA63      		ori r29,58
+ 941               	.LVL104:
+ 942               	.L44:
+ 643:ks0108b.c     ****         set_y_position (yy);            // Set row
+ 943               		.loc 1 643 0
+ 944 0304 812F      		mov r24,r17
+ 945 0306 0E94 0000 		call set_y_position
+ 946               	.LVL105:
+ 644:ks0108b.c     ****         ks0108b_write(CMD_COLUMN|CMD_CS12); // Set column
+ 947               		.loc 1 644 0
+ 948 030a 80E4      		ldi r24,lo8(64)
+ 949 030c 98E3      		ldi r25,lo8(56)
+ 950 030e 0E94 0000 		call ks0108b_write
+ 951               	.LVL106:
+ 952 0312 00E4      		ldi r16,lo8(64)
+ 953               	.LVL107:
+ 954               	.L42:
+ 955               		.loc 1 648 0 discriminator 2
+ 956 0314 CE01      		movw r24,r28
+ 957 0316 0E94 0000 		call ks0108b_write
+ 958               	.LVL108:
+ 959 031a 0150      		subi r16,lo8(-(-1))
+ 960               	.LVL109:
+ 647:ks0108b.c     ****         for (xx = 0; xx < SCREEN_PAGE; xx++)
+ 961               		.loc 1 647 0 discriminator 2
+ 962 031c 01F4      		brne .L42
+ 963               	.LBE24:
+ 637:ks0108b.c     ****     for (yy = 0; yy < SCREEN_ROWS; yy++)
+ 964               		.loc 1 637 0
+ 965 031e 1F5F      		subi r17,lo8(-(1))
+ 966               	.LVL110:
+ 967 0320 1830      		cpi r17,lo8(8)
+ 968 0322 01F4      		brne .L44
+ 969               	/* epilogue start */
+ 649:ks0108b.c     ****     }
+ 650:ks0108b.c     **** }
+ 970               		.loc 1 650 0
+ 971 0324 DF91      		pop r29
+ 972 0326 CF91      		pop r28
+ 973 0328 1F91      		pop r17
+ 974               	.LVL111:
+ 975 032a 0F91      		pop r16
+ 976               	.LVL112:
+ 977 032c 0895      		ret
+ 978               		.cfi_endproc
+ 979               	.LFE19:
+ 981               	.global	ks0108b_vscroll
+ 983               	ks0108b_vscroll:
+ 984               	.LFB20:
+ 651:ks0108b.c     **** 
+ 652:ks0108b.c     **** /////////////////////////////////////////////////////////////////////////////
+ 653:ks0108b.c     **** /// Scroll the display up by 1 line.
+ 654:ks0108b.c     **** ///
+ 655:ks0108b.c     **** /// @param [in] buf The buffer to use for reading and writing
+ 656:ks0108b.c     **** /// @param [in] pixels The number of pixels to scroll where -ve is up
+ 657:ks0108b.c     **** /// @param [in] mode The current mode.
+ 658:ks0108b.c     **** ///
+ 659:ks0108b.c     **** void
+ 660:ks0108b.c     **** ks0108b_vscroll (uint8_t *buf, int8_t pixels, uint8_t mode)
+ 661:ks0108b.c     **** {
+ 985               		.loc 1 661 0
+ 986               		.cfi_startproc
+ 987               	.LVL113:
+ 988 032e DF92      		push r13
+ 989               	.LCFI45:
+ 990               		.cfi_def_cfa_offset 3
+ 991               		.cfi_offset 13, -2
+ 992 0330 EF92      		push r14
+ 993               	.LCFI46:
+ 994               		.cfi_def_cfa_offset 4
+ 995               		.cfi_offset 14, -3
+ 996 0332 FF92      		push r15
+ 997               	.LCFI47:
+ 998               		.cfi_def_cfa_offset 5
+ 999               		.cfi_offset 15, -4
+ 1000 0334 0F93      		push r16
+ 1001               	.LCFI48:
+ 1002               		.cfi_def_cfa_offset 6
+ 1003               		.cfi_offset 16, -5
+ 1004 0336 1F93      		push r17
+ 1005               	.LCFI49:
+ 1006               		.cfi_def_cfa_offset 7
+ 1007               		.cfi_offset 17, -6
+ 1008 0338 CF93      		push r28
+ 1009               	.LCFI50:
+ 1010               		.cfi_def_cfa_offset 8
+ 1011               		.cfi_offset 28, -7
+ 1012 033a DF93      		push r29
+ 1013               	.LCFI51:
+ 1014               		.cfi_def_cfa_offset 9
+ 1015               		.cfi_offset 29, -8
+ 1016               	/* prologue: function */
+ 1017               	/* frame size = 0 */
+ 1018               	/* stack size = 7 */
+ 1019               	.L__stack_usage = 7
+ 1020 033c EC01      		movw r28,r24
+ 662:ks0108b.c     ****     uint8_t yy;                         // The y coordinate.
+ 663:ks0108b.c     ****     
+ 664:ks0108b.c     ****     // TODO: Currently we ignore pixels and simple do -8.
+ 665:ks0108b.c     ****     
+ 666:ks0108b.c     ****     // Only use the normal and reverse mode
+ 667:ks0108b.c     ****     mode &= MODE_NORMAL_MASK;
+ 1021               		.loc 1 667 0
+ 1022 033e 842F      		mov r24,r20
+ 1023               	.LVL114:
+ 1024 0340 8170      		andi r24,lo8(1)
+ 1025 0342 F82E      		mov r15,r24
+ 1026               	.LVL115:
+ 668:ks0108b.c     ****     
+ 669:ks0108b.c     ****     // Iterate over all of the rows.
+ 670:ks0108b.c     ****     for (yy = 0; yy < SCREEN_ROWS; yy++)
+ 1027               		.loc 1 670 0
+ 1028 0344 10E0      		ldi r17,0
+ 1029               	.LVL116:
+ 1030               	.L49:
+ 1031 0346 DD24      		clr r13
+ 1032 0348 D394      		inc r13
+ 1033 034a D10E      		add r13,r17
+ 671:ks0108b.c     ****     {
+ 672:ks0108b.c     ****         // Read in display data or clear the line
+ 673:ks0108b.c     ****         if (yy == (SCREEN_ROWS - 1))
+ 1034               		.loc 1 673 0
+ 1035 034c 1730      		cpi r17,lo8(7)
+ 1036 034e 01F4      		brne .L46
+ 674:ks0108b.c     ****             memset (buf, 0, SCREEN_WIDTH);
+ 1037               		.loc 1 674 0
+ 1038 0350 80E8      		ldi r24,lo8(-128)
+ 1039 0352 FE01      		movw r30,r28
+ 1040               		0:
+ 1041 0354 1192      		st Z+,__zero_reg__
+ 1042 0356 8A95      		dec r24
+ 1043 0358 01F4      		brne 0b
+ 1044 035a 00C0      		rjmp .L47
+ 1045               	.L46:
+ 675:ks0108b.c     ****         else
+ 676:ks0108b.c     ****             read_block (0, yy + 1, SCREEN_WIDTH, buf, 0x00, mode);
+ 1046               		.loc 1 676 0
+ 1047 035c EF2C      		mov r14,r15
+ 1048 035e 00E0      		ldi r16,0
+ 1049 0360 9E01      		movw r18,r28
+ 1050 0362 40E8      		ldi r20,lo8(-128)
+ 1051 0364 6D2D      		mov r22,r13
+ 1052 0366 80E0      		ldi r24,0
+ 1053 0368 0E94 0000 		call read_block
+ 1054               	.LVL117:
+ 1055               	.L47:
+ 677:ks0108b.c     ****         
+ 678:ks0108b.c     ****         // Write data back to screen
+ 679:ks0108b.c     ****         write_block (0, yy, SCREEN_WIDTH, buf, mode);
+ 1056               		.loc 1 679 0
+ 1057 036c 0F2D      		mov r16,r15
+ 1058 036e 9E01      		movw r18,r28
+ 1059 0370 40E8      		ldi r20,lo8(-128)
+ 1060 0372 612F      		mov r22,r17
+ 1061 0374 80E0      		ldi r24,0
+ 1062 0376 0E94 0000 		call write_block
+ 1063               	.LVL118:
+ 670:ks0108b.c     ****     for (yy = 0; yy < SCREEN_ROWS; yy++)
+ 1064               		.loc 1 670 0
+ 1065 037a 1D2D      		mov r17,r13
+ 1066               	.LVL119:
+ 1067 037c 1830      		cpi r17,lo8(8)
+ 1068 037e 01F4      		brne .L49
+ 1069               	.LVL120:
+ 1070               	/* epilogue start */
+ 680:ks0108b.c     ****     }
+ 681:ks0108b.c     **** }
+ 1071               		.loc 1 681 0
+ 1072 0380 DF91      		pop r29
+ 1073 0382 CF91      		pop r28
+ 1074               	.LVL121:
+ 1075 0384 1F91      		pop r17
+ 1076 0386 0F91      		pop r16
+ 1077 0388 FF90      		pop r15
+ 1078               	.LVL122:
+ 1079 038a EF90      		pop r14
+ 1080 038c DF90      		pop r13
+ 1081               	.LVL123:
+ 1082 038e 0895      		ret
+ 1083               		.cfi_endproc
+ 1084               	.LFE20:
+ 1086               	.global	ks0108b_screen_reverse
+ 1088               	ks0108b_screen_reverse:
+ 1089               	.LFB21:
+ 682:ks0108b.c     **** 
+ 683:ks0108b.c     **** /////////////////////////////////////////////////////////////////////////////
+ 684:ks0108b.c     **** /// Reverse the display. We read all of the screen values, invert them and
+ 685:ks0108b.c     **** /// then write them back.
+ 686:ks0108b.c     **** ///
+ 687:ks0108b.c     **** /// @param [in] buffer A buffer to use for 8 lines of screen data.
+ 688:ks0108b.c     **** ///
+ 689:ks0108b.c     **** void
+ 690:ks0108b.c     **** ks0108b_screen_reverse (uint8_t *buf)
+ 691:ks0108b.c     **** {
+ 1090               		.loc 1 691 0
+ 1091               		.cfi_startproc
+ 1092               	.LVL124:
+ 1093 0390 EF92      		push r14
+ 1094               	.LCFI52:
+ 1095               		.cfi_def_cfa_offset 3
+ 1096               		.cfi_offset 14, -2
+ 1097 0392 0F93      		push r16
+ 1098               	.LCFI53:
+ 1099               		.cfi_def_cfa_offset 4
+ 1100               		.cfi_offset 16, -3
+ 1101 0394 1F93      		push r17
+ 1102               	.LCFI54:
+ 1103               		.cfi_def_cfa_offset 5
+ 1104               		.cfi_offset 17, -4
+ 1105 0396 CF93      		push r28
+ 1106               	.LCFI55:
+ 1107               		.cfi_def_cfa_offset 6
+ 1108               		.cfi_offset 28, -5
+ 1109 0398 DF93      		push r29
+ 1110               	.LCFI56:
+ 1111               		.cfi_def_cfa_offset 7
+ 1112               		.cfi_offset 29, -6
+ 1113               	/* prologue: function */
+ 1114               	/* frame size = 0 */
+ 1115               	/* stack size = 5 */
+ 1116               	.L__stack_usage = 5
+ 1117 039a EC01      		movw r28,r24
+ 1118               	.LVL125:
+ 692:ks0108b.c     ****     uint8_t yy;
+ 693:ks0108b.c     **** 
+ 694:ks0108b.c     ****     // This is a reverse mode switch, do a logical inversion of the screen.
+ 695:ks0108b.c     ****     for (yy = 0; yy < 8; yy++)	//loop for each page
+ 1119               		.loc 1 695 0
+ 1120 039c 10E0      		ldi r17,0
+ 1121               	.LVL126:
+ 1122               	.L52:
+ 696:ks0108b.c     ****     {
+ 697:ks0108b.c     ****         // Read in display data and invert it
+ 698:ks0108b.c     ****         read_block (0, yy, SCREEN_WIDTH, buf, 0x00, MODE_NORMAL);
+ 1123               		.loc 1 698 0 discriminator 2
+ 1124 039e EE24      		clr r14
+ 1125 03a0 E394      		inc r14
+ 1126 03a2 00E0      		ldi r16,0
+ 1127 03a4 9E01      		movw r18,r28
+ 1128 03a6 40E8      		ldi r20,lo8(-128)
+ 1129 03a8 612F      		mov r22,r17
+ 1130 03aa 80E0      		ldi r24,0
+ 1131 03ac 0E94 0000 		call read_block
+ 1132               	.LVL127:
+ 699:ks0108b.c     ****         // Write inverted data back to screen
+ 700:ks0108b.c     ****         write_block (0, yy, SCREEN_WIDTH, buf, MODE_REVERSE);
+ 1133               		.loc 1 700 0 discriminator 2
+ 1134 03b0 9E01      		movw r18,r28
+ 1135 03b2 40E8      		ldi r20,lo8(-128)
+ 1136 03b4 612F      		mov r22,r17
+ 1137 03b6 80E0      		ldi r24,0
+ 1138 03b8 0E94 0000 		call write_block
+ 1139               	.LVL128:
+ 695:ks0108b.c     ****     for (yy = 0; yy < 8; yy++)	//loop for each page
+ 1140               		.loc 1 695 0 discriminator 2
+ 1141 03bc 1F5F      		subi r17,lo8(-(1))
+ 1142               	.LVL129:
+ 1143 03be 1830      		cpi r17,lo8(8)
+ 1144 03c0 01F4      		brne .L52
+ 1145               	/* epilogue start */
+ 701:ks0108b.c     ****     }
+ 702:ks0108b.c     **** }
+ 1146               		.loc 1 702 0
+ 1147 03c2 DF91      		pop r29
+ 1148 03c4 CF91      		pop r28
+ 1149               	.LVL130:
+ 1150 03c6 1F91      		pop r17
+ 1151               	.LVL131:
+ 1152 03c8 0F91      		pop r16
+ 1153 03ca EF90      		pop r14
+ 1154 03cc 0895      		ret
+ 1155               		.cfi_endproc
+ 1156               	.LFE21:
+ 1158               	.global	ks0108b_set_column
+ 1160               	ks0108b_set_column:
+ 1161               	.LFB22:
+ 703:ks0108b.c     **** 
+ 704:ks0108b.c     **** /////////////////////////////////////////////////////////////////////////////
+ 705:ks0108b.c     **** /// Sets/Draws a single column to the screen.
+ 706:ks0108b.c     **** /// The column is read row wise where y is (y & 0xf8)
+ 707:ks0108b.c     **** ///
+ 708:ks0108b.c     **** /// @param [in] x     The column to read.
+ 709:ks0108b.c     **** /// @param [in] y_row The row to re-write (y % 8).
+ 710:ks0108b.c     **** /// @param [in] data The data to write.
+ 711:ks0108b.c     **** /// @param [in] mask The bit mask of the valid bits of the data.
+ 712:ks0108b.c     **** /// @param [in] mode Merging modification operation to perform.
+ 713:ks0108b.c     **** ///
+ 714:ks0108b.c     **** ///             0x00 - MODE_REVERSE
+ 715:ks0108b.c     **** ///                    No merge required, reverse the data.
+ 716:ks0108b.c     **** ///                    buffer[x] = ~read_data
+ 717:ks0108b.c     **** ///                    Reverse is applied irrespective of the
+ 718:ks0108b.c     **** ///                    combinational modes (OR, XOR, NAND).
+ 719:ks0108b.c     **** ///                    So the data is returned un-reversed.
+ 720:ks0108b.c     **** ///
+ 721:ks0108b.c     **** ///             0x01 - MODE_COPY
+ 722:ks0108b.c     **** ///                    No merge required.
+ 723:ks0108b.c     **** ///                    buffer[x] = read_data
+ 724:ks0108b.c     **** ///
+ 725:ks0108b.c     **** ///             0x02 - MODE_MERGE
+ 726:ks0108b.c     **** ///                    A copy with merge required.
+ 727:ks0108b.c     **** ///                    buffer[x] = read_data
+ 728:ks0108b.c     **** ///
+ 729:ks0108b.c     **** ///             0x04 - MODE_OR
+ 730:ks0108b.c     **** ///                    Merge - OR bits set in buffer
+ 731:ks0108b.c     **** ///                    buffer[x] = buffer[x] | read_data
+ 732:ks0108b.c     **** ///
+ 733:ks0108b.c     **** ///             0x08 - MODE_XOR
+ 734:ks0108b.c     **** ///                    Merge - XOR bits set in buffer
+ 735:ks0108b.c     **** ///                    buffer[x] = buffer[x] ^ read_data
+ 736:ks0108b.c     **** ///
+ 737:ks0108b.c     **** ///             0x0c - MODE_NAND
+ 738:ks0108b.c     **** ///                    Merge required - NAND bits cleared in buffer
+ 739:ks0108b.c     **** ///                    buffer[x] = ~buffer[x] & read_data
+ 740:ks0108b.c     **** ///
+ 741:ks0108b.c     **** void
+ 742:ks0108b.c     **** ks0108b_set_column (uint8_t x, uint8_t y_row, uint8_t data, uint8_t mask, uint8_t mode)
+ 743:ks0108b.c     **** {
+ 1162               		.loc 1 743 0
+ 1163               		.cfi_startproc
+ 1164               	.LVL132:
+ 1165 03ce AF92      		push r10
+ 1166               	.LCFI57:
+ 1167               		.cfi_def_cfa_offset 3
+ 1168               		.cfi_offset 10, -2
+ 1169 03d0 BF92      		push r11
+ 1170               	.LCFI58:
+ 1171               		.cfi_def_cfa_offset 4
+ 1172               		.cfi_offset 11, -3
+ 1173 03d2 CF92      		push r12
+ 1174               	.LCFI59:
+ 1175               		.cfi_def_cfa_offset 5
+ 1176               		.cfi_offset 12, -4
+ 1177 03d4 DF92      		push r13
+ 1178               	.LCFI60:
+ 1179               		.cfi_def_cfa_offset 6
+ 1180               		.cfi_offset 13, -5
+ 1181 03d6 EF92      		push r14
+ 1182               	.LCFI61:
+ 1183               		.cfi_def_cfa_offset 7
+ 1184               		.cfi_offset 14, -6
+ 1185 03d8 FF92      		push r15
+ 1186               	.LCFI62:
+ 1187               		.cfi_def_cfa_offset 8
+ 1188               		.cfi_offset 15, -7
+ 1189 03da 0F93      		push r16
+ 1190               	.LCFI63:
+ 1191               		.cfi_def_cfa_offset 9
+ 1192               		.cfi_offset 16, -8
+ 1193 03dc 1F93      		push r17
+ 1194               	.LCFI64:
+ 1195               		.cfi_def_cfa_offset 10
+ 1196               		.cfi_offset 17, -9
+ 1197 03de CF93      		push r28
+ 1198               	.LCFI65:
+ 1199               		.cfi_def_cfa_offset 11
+ 1200               		.cfi_offset 28, -10
+ 1201 03e0 DF93      		push r29
+ 1202               	.LCFI66:
+ 1203               		.cfi_def_cfa_offset 12
+ 1204               		.cfi_offset 29, -11
+ 1205               	/* prologue: function */
+ 1206               	/* frame size = 0 */
+ 1207               	/* stack size = 10 */
+ 1208               	.L__stack_usage = 10
+ 1209 03e2 C82F      		mov r28,r24
+ 1210 03e4 862F      		mov r24,r22
+ 1211               	.LVL133:
+ 1212 03e6 D42E      		mov r13,r20
+ 1213 03e8 B22E      		mov r11,r18
+ 1214 03ea C02E      		mov r12,r16
+ 744:ks0108b.c     ****     uint16_t cs_select;
+ 745:ks0108b.c     **** 
+ 746:ks0108b.c     ****     // Set the y-position enable the display, write to both chips/pages
+ 747:ks0108b.c     ****     // concurrently.
+ 748:ks0108b.c     ****     set_y_position (y_row);              // Set row
+ 1215               		.loc 1 748 0
+ 1216 03ec 0E94 0000 		call set_y_position
+ 1217               	.LVL134:
+ 749:ks0108b.c     **** 
+ 750:ks0108b.c     ****     // Set the x-position chip select.
+ 751:ks0108b.c     ****     if (x < 64)
+ 1218               		.loc 1 751 0
+ 1219 03f0 C034      		cpi r28,lo8(64)
+ 1220 03f2 00F4      		brsh .L63
+ 752:ks0108b.c     ****         cs_select = CMD_CS2;
+ 1221               		.loc 1 752 0
+ 1222 03f4 00E0      		ldi r16,0
+ 1223 03f6 10E2      		ldi r17,lo8(32)
+ 1224               	.LVL135:
+ 1225 03f8 00C0      		rjmp .L54
+ 1226               	.L63:
+ 753:ks0108b.c     ****     else
+ 754:ks0108b.c     ****         cs_select = CMD_CS1;
+ 1227               		.loc 1 754 0
+ 1228 03fa 00E0      		ldi r16,0
+ 1229 03fc 10E1      		ldi r17,lo8(16)
+ 1230               	.L54:
+ 1231               	.LVL136:
+ 755:ks0108b.c     **** 
+ 756:ks0108b.c     ****     // Set the column we are writing.
+ 757:ks0108b.c     ****     ks0108b_write (CMD_COLUMN | cs_select | (x & 0x3f)); // Set column
+ 1232               		.loc 1 757 0
+ 1233 03fe CF73      		andi r28,lo8(63)
+ 1234               	.LVL137:
+ 1235 0400 D0E0      		ldi r29,0
+ 1236 0402 C064      		ori r28,64
+ 1237 0404 D860      		ori r29,8
+ 1238 0406 C02B      		or r28,r16
+ 1239 0408 D12B      		or r29,r17
+ 1240 040a CE01      		movw r24,r28
+ 1241 040c 0E94 0000 		call ks0108b_write
+ 1242               	.LVL138:
+ 1243 0410 8C2D      		mov r24,r12
+ 1244 0412 8170      		andi r24,lo8(1)
+ 1245 0414 A82E      		mov r10,r24
+ 758:ks0108b.c     **** 
+ 759:ks0108b.c     ****     // Handle any buffer merging on the read.
+ 760:ks0108b.c     ****     if ((mode & MODE_MODIFIER) != 0)
+ 1246               		.loc 1 760 0
+ 1247 0416 8C2D      		mov r24,r12
+ 1248 0418 8671      		andi r24,lo8(22)
+ 1249 041a 01F0      		breq .L55
+ 1250               	.LBB30:
+ 761:ks0108b.c     ****     {
+ 762:ks0108b.c     ****         uint8_t screen_data;
+ 763:ks0108b.c     **** 
+ 764:ks0108b.c     ****         // Perform a dummy read to transfer to register
+ 765:ks0108b.c     ****         ks0108b_read (CMD_READ | cs_select);
+ 1251               		.loc 1 765 0
+ 1252 041c 7801      		movw r14,r16
+ 1253 041e 8EE0      		ldi r24,14
+ 1254 0420 F82A      		or r15,r24
+ 1255 0422 C701      		movw r24,r14
+ 1256 0424 0E94 0000 		call ks0108b_read
+ 1257               	.LVL139:
+ 766:ks0108b.c     **** 
+ 767:ks0108b.c     ****         // We need to perform a merge. Get the data from controller
+ 768:ks0108b.c     ****         screen_data = ks0108b_read (CMD_READ | cs_select);
+ 1258               		.loc 1 768 0
+ 1259 0428 C701      		movw r24,r14
+ 1260 042a 0E94 0000 		call ks0108b_read
+ 1261               	.LVL140:
+ 769:ks0108b.c     **** 
+ 770:ks0108b.c     ****         // Apply any reverse setting; if the reverse bit is set then we
+ 771:ks0108b.c     ****         // negate the data
+ 772:ks0108b.c     ****         if ((mode & MODE_NORMAL_MASK) == MODE_REVERSE)
+ 1262               		.loc 1 772 0
+ 1263 042e A110      		cpse r10,__zero_reg__
+ 1264 0430 00C0      		rjmp .L56
+ 773:ks0108b.c     ****             screen_data = ~screen_data;
+ 1265               		.loc 1 773 0
+ 1266 0432 8095      		com r24
+ 1267               	.LVL141:
+ 1268               	.L56:
+ 774:ks0108b.c     **** 
+ 775:ks0108b.c     ****         // Perform the merge
+ 776:ks0108b.c     ****         if ((mode & MODE_OP_MASK) != 0)
+ 1269               		.loc 1 776 0
+ 1270 0434 9C2D      		mov r25,r12
+ 1271 0436 9670      		andi r25,lo8(6)
+ 1272 0438 01F0      		breq .L57
+ 1273               	.LVL142:
+ 1274               	.LBB31:
+ 1275               	.LBB32:
+ 178:ks0108b.c     ****     if (mode >= MODE_XOR)
+ 1276               		.loc 1 178 0
+ 1277 043a 9430      		cpi r25,lo8(4)
+ 1278 043c 00F0      		brlo .L58
+ 1279               	.LVL143:
+ 1280               	.LBB33:
+ 1281               	.LBB34:
+ 181:ks0108b.c     ****         if ((mode & MODE_XOR) != 0)
+ 1282               		.loc 1 181 0
+ 1283 043e C2FE      		sbrs r12,2
+ 1284 0440 00C0      		rjmp .L59
+ 184:ks0108b.c     ****             new_column ^= orig_column;
+ 1285               		.loc 1 184 0
+ 1286 0442 D826      		eor r13,r24
+ 1287               	.LVL144:
+ 1288 0444 00C0      		rjmp .L57
+ 1289               	.LVL145:
+ 1290               	.L59:
+ 189:ks0108b.c     ****             new_column = ~new_column & orig_column;
+ 1291               		.loc 1 189 0
+ 1292 0446 D094      		com r13
+ 1293               	.LVL146:
+ 1294 0448 D822      		and r13,r24
+ 1295               	.LVL147:
+ 1296 044a 00C0      		rjmp .L57
+ 1297               	.LVL148:
+ 1298               	.L58:
+ 1299               	.LBE34:
+ 1300               	.LBE33:
+ 195:ks0108b.c     ****         new_column |= orig_column;
+ 1301               		.loc 1 195 0
+ 1302 044c D82A      		or r13,r24
+ 1303               	.LVL149:
+ 1304               	.L57:
+ 1305               	.LBE32:
+ 1306               	.LBE31:
+ 777:ks0108b.c     ****             data = merge_column (data, screen_data, mode);
+ 778:ks0108b.c     **** 
+ 779:ks0108b.c     ****         // MODE_MERGE - Merge in the data in a copy mode
+ 780:ks0108b.c     ****         data = (data & mask) | (screen_data & ~mask);
+ 1307               		.loc 1 780 0
+ 1308 044e DB20      		and r13,r11
+ 1309               	.LVL150:
+ 1310 0450 2B2D      		mov r18,r11
+ 1311 0452 2095      		com r18
+ 1312 0454 2823      		and r18,r24
+ 1313 0456 D22A      		or r13,r18
+ 1314               	.LVL151:
+ 781:ks0108b.c     **** 
+ 782:ks0108b.c     ****         // Reset the position ready to write the data.
+ 783:ks0108b.c     ****         ks0108b_write (CMD_COLUMN | cs_select | (x & 0x3f));
+ 1315               		.loc 1 783 0
+ 1316 0458 CE01      		movw r24,r28
+ 1317               	.LVL152:
+ 1318 045a 0E94 0000 		call ks0108b_write
+ 1319               	.LVL153:
+ 1320               	.L55:
+ 1321               	.LBE30:
+ 784:ks0108b.c     ****     }
+ 785:ks0108b.c     **** 
+ 786:ks0108b.c     ****     // Apply any reverse setting; if the reverse bit is set then we
+ 787:ks0108b.c     ****     // negate the data
+ 788:ks0108b.c     ****     if ((mode & MODE_NORMAL_MASK) == MODE_REVERSE)
+ 1322               		.loc 1 788 0
+ 1323 045e A110      		cpse r10,__zero_reg__
+ 1324 0460 00C0      		rjmp .L62
+ 789:ks0108b.c     ****         data = ~data;
+ 1325               		.loc 1 789 0
+ 1326 0462 D094      		com r13
+ 1327               	.LVL154:
+ 1328               	.L62:
+ 790:ks0108b.c     **** 
+ 791:ks0108b.c     ****     // Write the data.
+ 792:ks0108b.c     ****     ks0108b_write (CMD_WRITE | cs_select | data);
+ 1329               		.loc 1 792 0
+ 1330 0464 C801      		movw r24,r16
+ 1331 0466 9A60      		ori r25,10
+ 1332 0468 8D29      		or r24,r13
+ 1333               	/* epilogue start */
+ 793:ks0108b.c     **** }
+ 1334               		.loc 1 793 0
+ 1335 046a DF91      		pop r29
+ 1336 046c CF91      		pop r28
+ 1337 046e 1F91      		pop r17
+ 1338 0470 0F91      		pop r16
+ 1339               	.LVL155:
+ 1340 0472 FF90      		pop r15
+ 1341 0474 EF90      		pop r14
+ 1342 0476 DF90      		pop r13
+ 1343               	.LVL156:
+ 1344 0478 CF90      		pop r12
+ 1345               	.LVL157:
+ 1346 047a BF90      		pop r11
+ 1347               	.LVL158:
+ 1348 047c AF90      		pop r10
+ 792:ks0108b.c     ****     ks0108b_write (CMD_WRITE | cs_select | data);
+ 1349               		.loc 1 792 0
+ 1350 047e 0C94 0000 		jmp ks0108b_write
+ 1351               	.LVL159:
+ 1352               		.cfi_endproc
+ 1353               	.LFE22:
+ 1355               	.global	ks0108b_set_pixel
+ 1357               	ks0108b_set_pixel:
+ 1358               	.LFB23:
+ 794:ks0108b.c     **** 
+ 795:ks0108b.c     **** /////////////////////////////////////////////////////////////////////////////
+ 796:ks0108b.c     **** /// Set a single pixel. Set assumes that the pixel is being set. This is
+ 797:ks0108b.c     **** /// important as the mode flag set to '1' means reverse which is clear a
+ 798:ks0108b.c     **** /// pixel. The logic outwardly is reverse from the user interface but it is
+ 799:ks0108b.c     **** /// up to the upper levels to resolve this at this level we do not
+ 800:ks0108b.c     **** /// interrogate the reverse flag so there is no ambiguity as to what flag is
+ 801:ks0108b.c     **** /// applied at what level.
+ 802:ks0108b.c     **** ///
+ 803:ks0108b.c     **** /// The pixels are in big endian format which is logical and the screen is
+ 804:ks0108b.c     **** /// effectivelly addressed from left to right. That means pixel 0,0 occupies
+ 805:ks0108b.c     **** /// the most significant bit (bit 7) and is set to 0x80.
+ 806:ks0108b.c     **** ///
+ 807:ks0108b.c     **** /// @param [in] x_column The column to read (x % 8)
+ 808:ks0108b.c     **** /// @param [in] y The row to re-write.
+ 809:ks0108b.c     **** /// @param [in] mode Merging modification operation to perform.
+ 810:ks0108b.c     **** ///
+ 811:ks0108b.c     **** ///             0x00 - MODE_REVERSE
+ 812:ks0108b.c     **** ///                    No merge required, reverse the data.
+ 813:ks0108b.c     **** ///                    buffer[x] = ~read_data
+ 814:ks0108b.c     **** ///                    Reverse is applied irrespective of the
+ 815:ks0108b.c     **** ///                    combinational modes (OR, XOR, NAND).
+ 816:ks0108b.c     **** ///                    So the data is returned un-reversed.
+ 817:ks0108b.c     **** ///
+ 818:ks0108b.c     **** ///             0x01 - MODE_COPY
+ 819:ks0108b.c     **** ///                    No merge required.
+ 820:ks0108b.c     **** ///                    buffer[x] = read_data
+ 821:ks0108b.c     **** ///
+ 822:ks0108b.c     **** ///             0x86 - MODE_NAND
+ 823:ks0108b.c     **** ///                    Merge required - NAND bits cleared in buffer
+ 824:ks0108b.c     **** ///                    buffer[x] = ~buffer[x] & read_data
+ 825:ks0108b.c     **** ///
+ 826:ks0108b.c     **** ///             0x80 - MODE_OR
+ 827:ks0108b.c     **** ///                    Merge - OR bits set in buffer
+ 828:ks0108b.c     **** ///                    buffer[x] = buffer[x] | read_data
+ 829:ks0108b.c     **** ///
+ 830:ks0108b.c     **** ///             0x82 - MODE_XOR
+ 831:ks0108b.c     **** ///                    Merge - XOR bits set in buffer
+ 832:ks0108b.c     **** ///                    buffer[x] = buffer[x] ^ read_data
+ 833:ks0108b.c     **** ///
+ 834:ks0108b.c     **** void
+ 835:ks0108b.c     **** ks0108b_set_pixel (uint8_t x, uint8_t y, uint8_t mode)
+ 836:ks0108b.c     **** {
+ 1359               		.loc 1 836 0
+ 1360               		.cfi_startproc
+ 1361               	.LVL160:
+ 1362 0482 0F93      		push r16
+ 1363               	.LCFI67:
+ 1364               		.cfi_def_cfa_offset 3
+ 1365               		.cfi_offset 16, -2
+ 1366               	/* prologue: function */
+ 1367               	/* frame size = 0 */
+ 1368               	/* stack size = 1 */
+ 1369               	.L__stack_usage = 1
+ 1370 0484 042F      		mov r16,r20
+ 1371               	.LVL161:
+ 1372               	.LBB35:
+ 837:ks0108b.c     ****     uint8_t mask;
+ 838:ks0108b.c     ****     // The caller has requested a modification of the bit based on the screen
+ 839:ks0108b.c     ****     // contents. Perform a read-modify-write operation to set the pixel to
+ 840:ks0108b.c     ****     // the right value.
+ 841:ks0108b.c     ****     //
+ 842:ks0108b.c     ****     // Convert y to a row value.
+ 843:ks0108b.c     ****     // Set data to pixel to write by bit shifting 0 to the top bit.
+ 844:ks0108b.c     ****     // Pass the mode in the call
+ 845:ks0108b.c     ****     // 1 << y & 0x7
+ 846:ks0108b.c     ****     mask = pgm_read_byte (&bit_shift_single_maskP[y & 0x7]);
+ 1373               		.loc 1 846 0
+ 1374 0486 E62F      		mov r30,r22
+ 1375 0488 E770      		andi r30,lo8(7)
+ 1376 048a F0E0      		ldi r31,0
+ 1377 048c E050      		subi r30,lo8(-(bit_shift_single_maskP))
+ 1378 048e F040      		sbci r31,hi8(-(bit_shift_single_maskP))
+ 1379               	/* #APP */
+ 1380               	 ;  846 "ks0108b.c" 1
+ 1381 0490 4491      		lpm r20, Z
+ 1382               		
+ 1383               	 ;  0 "" 2
+ 1384               	.LVL162:
+ 1385               	/* #NOAPP */
+ 1386               	.LBE35:
+ 847:ks0108b.c     ****     ks0108b_set_column (x, y >> 3, mask, mask, MODE_MERGE | mode);
+ 1387               		.loc 1 847 0
+ 1388 0492 0061      		ori r16,lo8(16)
+ 1389               	.LVL163:
+ 1390 0494 6695      		lsr r22
+ 1391 0496 6695      		lsr r22
+ 1392 0498 6695      		lsr r22
+ 1393               	.LVL164:
+ 1394 049a 242F      		mov r18,r20
+ 1395 049c 0E94 0000 		call ks0108b_set_column
+ 1396               	.LVL165:
+ 1397               	/* epilogue start */
+ 848:ks0108b.c     **** }
+ 1398               		.loc 1 848 0
+ 1399 04a0 0F91      		pop r16
+ 1400 04a2 0895      		ret
+ 1401               		.cfi_endproc
+ 1402               	.LFE23:
+ 1404               	.global	ks0108b_vbitblt
+ 1406               	ks0108b_vbitblt:
+ 1407               	.LFB24:
+ 849:ks0108b.c     **** 
+ 850:ks0108b.c     **** //////////////////////////////////////////////////////////////////////////////
+ 851:ks0108b.c     **** /// Vertical bitblt does a bit transfer from data to display memory. If NULL
+ 852:ks0108b.c     **** /// is passed as data, bitblt assumes the data is to come from the serial
+ 853:ks0108b.c     **** /// port, and will take it from there. Bitblt will not return until it gets
+ 854:ks0108b.c     **** /// all the bytes it wants.
+ 855:ks0108b.c     **** ///
+ 856:ks0108b.c     **** /// @param [in] x,y is upper left corner of image in pixels. Bitblt counts
+ 857:ks0108b.c     **** ///             coordinates in the standard fashion. ie (0,0) is upper left,
+ 858:ks0108b.c     **** ///             +x it to the right +y is down width is width in pixels.
+ 859:ks0108b.c     **** ///
+ 860:ks0108b.c     **** /// @param [in] mode determines how the bits in the image combine with the
+ 861:ks0108b.c     **** ///             bits already present on the display.
+ 862:ks0108b.c     **** ///
+ 863:ks0108b.c     **** ///             0x00 - MODE_REVERSE
+ 864:ks0108b.c     **** ///                    No merge required, reverse the data.
+ 865:ks0108b.c     **** ///                    buffer[x] = ~read_data
+ 866:ks0108b.c     **** ///                    Reverse is applied irrespective of the
+ 867:ks0108b.c     **** ///                    combinational modes (OR, XOR, NAND).
+ 868:ks0108b.c     **** ///                    So the data is returned un-reversed.
+ 869:ks0108b.c     **** ///
+ 870:ks0108b.c     **** ///             0x01 - MODE_COPY
+ 871:ks0108b.c     **** ///                    No merge required.
+ 872:ks0108b.c     **** ///                    buffer[x] = read_data
+ 873:ks0108b.c     **** ///
+ 874:ks0108b.c     **** ///             0x02 - MODE_OR
+ 875:ks0108b.c     **** ///                    Merge - OR bits set in buffer
+ 876:ks0108b.c     **** ///                    buffer[x] = buffer[x] | read_data
+ 877:ks0108b.c     **** ///
+ 878:ks0108b.c     **** ///             0x04 - MODE_XOR
+ 879:ks0108b.c     **** ///                    Merge - XOR bits set in buffer
+ 880:ks0108b.c     **** ///                    buffer[x] = buffer[x] ^ read_data
+ 881:ks0108b.c     **** ///
+ 882:ks0108b.c     **** ///             0x08 - MODE_NAND
+ 883:ks0108b.c     **** ///                    Merge required - NAND bits cleared in buffer
+ 884:ks0108b.c     **** ///                    buffer[x] = ~buffer[x] & read_data
+ 885:ks0108b.c     **** ///
+ 886:ks0108b.c     **** ///             0x10 - MODE_FILL
+ 887:ks0108b.c     **** ///                    Interpret the data as a mask and fill.
+ 888:ks0108b.c     **** void
+ 889:ks0108b.c     **** ks0108b_vbitblt (uint8_t x, uint8_t y, uint8_t width, uint8_t height, uint8_t mode, uint8_t *data)
+ 890:ks0108b.c     **** {
+ 1408               		.loc 1 890 0
+ 1409               		.cfi_startproc
+ 1410               	.LVL166:
+ 1411 04a4 2F92      		push r2
+ 1412               	.LCFI68:
+ 1413               		.cfi_def_cfa_offset 3
+ 1414               		.cfi_offset 2, -2
+ 1415 04a6 3F92      		push r3
+ 1416               	.LCFI69:
+ 1417               		.cfi_def_cfa_offset 4
+ 1418               		.cfi_offset 3, -3
+ 1419 04a8 4F92      		push r4
+ 1420               	.LCFI70:
+ 1421               		.cfi_def_cfa_offset 5
+ 1422               		.cfi_offset 4, -4
+ 1423 04aa 5F92      		push r5
+ 1424               	.LCFI71:
+ 1425               		.cfi_def_cfa_offset 6
+ 1426               		.cfi_offset 5, -5
+ 1427 04ac 6F92      		push r6
+ 1428               	.LCFI72:
+ 1429               		.cfi_def_cfa_offset 7
+ 1430               		.cfi_offset 6, -6
+ 1431 04ae 7F92      		push r7
+ 1432               	.LCFI73:
+ 1433               		.cfi_def_cfa_offset 8
+ 1434               		.cfi_offset 7, -7
+ 1435 04b0 8F92      		push r8
+ 1436               	.LCFI74:
+ 1437               		.cfi_def_cfa_offset 9
+ 1438               		.cfi_offset 8, -8
+ 1439 04b2 9F92      		push r9
+ 1440               	.LCFI75:
+ 1441               		.cfi_def_cfa_offset 10
+ 1442               		.cfi_offset 9, -9
+ 1443 04b4 AF92      		push r10
+ 1444               	.LCFI76:
+ 1445               		.cfi_def_cfa_offset 11
+ 1446               		.cfi_offset 10, -10
+ 1447 04b6 BF92      		push r11
+ 1448               	.LCFI77:
+ 1449               		.cfi_def_cfa_offset 12
+ 1450               		.cfi_offset 11, -11
+ 1451 04b8 CF92      		push r12
+ 1452               	.LCFI78:
+ 1453               		.cfi_def_cfa_offset 13
+ 1454               		.cfi_offset 12, -12
+ 1455 04ba DF92      		push r13
+ 1456               	.LCFI79:
+ 1457               		.cfi_def_cfa_offset 14
+ 1458               		.cfi_offset 13, -13
+ 1459 04bc EF92      		push r14
+ 1460               	.LCFI80:
+ 1461               		.cfi_def_cfa_offset 15
+ 1462               		.cfi_offset 14, -14
+ 1463 04be FF92      		push r15
+ 1464               	.LCFI81:
+ 1465               		.cfi_def_cfa_offset 16
+ 1466               		.cfi_offset 15, -15
+ 1467 04c0 0F93      		push r16
+ 1468               	.LCFI82:
+ 1469               		.cfi_def_cfa_offset 17
+ 1470               		.cfi_offset 16, -16
+ 1471 04c2 1F93      		push r17
+ 1472               	.LCFI83:
+ 1473               		.cfi_def_cfa_offset 18
+ 1474               		.cfi_offset 17, -17
+ 1475 04c4 CF93      		push r28
+ 1476               	.LCFI84:
+ 1477               		.cfi_def_cfa_offset 19
+ 1478               		.cfi_offset 28, -18
+ 1479 04c6 DF93      		push r29
+ 1480               	.LCFI85:
+ 1481               		.cfi_def_cfa_offset 20
+ 1482               		.cfi_offset 29, -19
+ 1483 04c8 CDB7      		in r28,__SP_L__
+ 1484 04ca DEB7      		in r29,__SP_H__
+ 1485               	.LCFI86:
+ 1486               		.cfi_def_cfa_register 28
+ 1487 04cc 6097      		sbiw r28,16
+ 1488               	.LCFI87:
+ 1489               		.cfi_def_cfa_offset 36
+ 1490 04ce 0FB6      		in __tmp_reg__,__SREG__
+ 1491 04d0 F894      		cli
+ 1492 04d2 DEBF      		out __SP_H__,r29
+ 1493 04d4 0FBE      		out __SREG__,__tmp_reg__
+ 1494 04d6 CDBF      		out __SP_L__,r28
+ 1495               	/* prologue: function */
+ 1496               	/* frame size = 16 */
+ 1497               	/* stack size = 34 */
+ 1498               	.L__stack_usage = 34
+ 1499 04d8 482E      		mov r4,r24
+ 1500 04da 642E      		mov r6,r20
+ 1501 04dc 502F      		mov r21,r16
+ 1502 04de F88A      		std Y+16,r15
+ 1503 04e0 EF86      		std Y+15,r14
+ 1504               	.LVL167:
+ 891:ks0108b.c     ****     // Define the sources.
+ 892:ks0108b.c     ****     const uint8_t SOURCE_DATA_BYTE  = 0x00;  // Single data byte is the source
+ 893:ks0108b.c     ****     const uint8_t SOURCE_DATA_PTR   = 0x01;  // Data pointer is source
+ 894:ks0108b.c     ****     const uint8_t SOURCE_SERIAL     = 0x02;  // Serial is the source
+ 895:ks0108b.c     ****     
+ 896:ks0108b.c     ****     // Define the mixing operations.
+ 897:ks0108b.c     ****     const uint8_t OPERATION_ALIGNED = 0x00;  // The merge is aligned
+ 898:ks0108b.c     ****     const uint8_t OPERATION_TOP     = 0x01;  // The top line 
+ 899:ks0108b.c     ****     const uint8_t OPERATION_MIDDLE  = 0x02;  // The bottom line
+ 900:ks0108b.c     ****     const uint8_t OPERATION_BOTTOM  = 0x03;  // The middle line
+ 901:ks0108b.c     ****     
+ 902:ks0108b.c     ****     uint8_t source = SOURCE_SERIAL;     // Source of the data
+ 903:ks0108b.c     ****     uint8_t operation = 0;              // The operation required.
+ 904:ks0108b.c     ****     uint8_t page_rows;                  // The number of screen page rows
+ 905:ks0108b.c     ****     uint8_t image_rows;                 // The number of image page rows
+ 906:ks0108b.c     ****     uint8_t col;                        // The current column being processed.
+ 907:ks0108b.c     ****     uint8_t row;                        // The current row being processed.
+ 908:ks0108b.c     ****     uint8_t shift_top;                  // Shift to move to upper part of page.
+ 909:ks0108b.c     ****     uint8_t shift_bot;                  // Shift to move to lower part of page.
+ 910:ks0108b.c     ****     uint8_t mask_top;                   // Top line mask.
+ 911:ks0108b.c     ****     uint8_t mask_bot;                   // Bottom line mask
+ 912:ks0108b.c     ****     int offset;                         // Offset into the data
+ 913:ks0108b.c     **** 
+ 914:ks0108b.c     ****     // Calculate how much to shift the data bytes to line them up with the
+ 915:ks0108b.c     ****     // pages. Set up the row flag if the pages are aligned.
+ 916:ks0108b.c     ****     shift_top = y & 0x7;
+ 1505               		.loc 1 916 0
+ 1506 04e2 862F      		mov r24,r22
+ 1507               	.LVL168:
+ 1508 04e4 8770      		andi r24,lo8(7)
+ 1509 04e6 582E      		mov r5,r24
+ 1510               	.LVL169:
+ 917:ks0108b.c     ****     shift_bot = 8 - shift_top;          // Bottom shift of opposite of top
+ 1511               		.loc 1 917 0
+ 1512 04e8 48E0      		ldi r20,lo8(8)
+ 1513 04ea F42E      		mov r15,r20
+ 1514               	.LVL170:
+ 1515 04ec F81A      		sub r15,r24
+ 1516               	.LVL171:
+ 918:ks0108b.c     **** 
+ 919:ks0108b.c     ****     // Number of pages(rows) the image occupies. We need to loop through all
+ 920:ks0108b.c     ****     // of these, each gets pixels changed.
+ 921:ks0108b.c     ****     page_rows = (uint8_t)(height + shift_top + 7) >> 3;      // Divide by 8
+ 1517               		.loc 1 921 0
+ 1518 04ee 87E0      		ldi r24,lo8(7)
+ 1519 04f0 820F      		add r24,r18
+ 1520 04f2 952C      		mov r9,r5
+ 1521 04f4 980E      		add r9,r24
+ 1522 04f6 9694      		lsr r9
+ 1523 04f8 9694      		lsr r9
+ 1524 04fa 9694      		lsr r9
+ 1525               	.LVL172:
+ 922:ks0108b.c     ****     image_rows = (uint8_t)(height + 7) >> 3;                 // Divide by 8
+ 1526               		.loc 1 922 0
+ 1527 04fc 8695      		lsr r24
+ 1528 04fe 8695      		lsr r24
+ 1529 0500 8695      		lsr r24
+ 1530 0502 8F83      		std Y+7,r24
+ 1531               	.LVL173:
+ 923:ks0108b.c     **** 
+ 924:ks0108b.c     ****     if (height < 8)
+ 1532               		.loc 1 924 0
+ 1533 0504 2830      		cpi r18,lo8(8)
+ 1534 0506 00F4      		brsh .L72
+ 1535               	.LVL174:
+ 925:ks0108b.c     ****     {
+ 926:ks0108b.c     ****         // Mask for the row bits.
+ 927:ks0108b.c     ****         mask_top = (1 << height) - 1;
+ 1536               		.loc 1 927 0
+ 1537 0508 81E0      		ldi r24,lo8(1)
+ 1538 050a 90E0      		ldi r25,0
+ 1539               	.LVL175:
+ 1540 050c 00C0      		rjmp 2f
+ 1541               		1:
+ 1542 050e 880F      		lsl r24
+ 1543               		2:
+ 1544 0510 2A95      		dec r18
+ 1545 0512 02F4      		brpl 1b
+ 1546 0514 8150      		subi r24,lo8(-(-1))
+ 928:ks0108b.c     ****         // mask_bot needs to have 0's for each pixel in the bottom row NOT
+ 929:ks0108b.c     ****         // occupied by new image data
+ 930:ks0108b.c     ****         mask_bot = mask_top >> shift_bot;
+ 1547               		.loc 1 930 0
+ 1548 0516 90E0      		ldi r25,0
+ 1549 0518 9C01      		movw r18,r24
+ 1550               	.LVL176:
+ 1551 051a 0F2C      		mov r0,r15
+ 1552 051c 00C0      		rjmp 2f
+ 1553               		1:
+ 1554 051e 3595      		asr r19
+ 1555 0520 2795      		ror r18
+ 1556               		2:
+ 1557 0522 0A94      		dec r0
+ 1558 0524 02F4      		brpl 1b
+ 1559 0526 722E      		mov r7,r18
+ 1560               	.LVL177:
+ 931:ks0108b.c     ****         // mask_top needs to have 0's for each pixel in the top row NOT occupied
+ 932:ks0108b.c     ****         // by new image data
+ 933:ks0108b.c     ****         mask_top = mask_top << shift_top;
+ 1561               		.loc 1 933 0
+ 1562 0528 882E      		mov r8,r24
+ 1563 052a 052C      		mov r0,r5
+ 1564 052c 00C0      		rjmp 2f
+ 1565               		1:
+ 1566 052e 880C      		lsl r8
+ 1567               		2:
+ 1568 0530 0A94      		dec r0
+ 1569 0532 02F4      		brpl 1b
+ 1570               	.LVL178:
+ 1571 0534 00C0      		rjmp .L73
+ 1572               	.LVL179:
+ 1573               	.L72:
+ 934:ks0108b.c     ****     }
+ 935:ks0108b.c     ****     else
+ 936:ks0108b.c     ****     {
+ 937:ks0108b.c     ****         mask_bot = 0xff;
+ 938:ks0108b.c     ****         // mask_top needs to have 0's for each pixel in the top row NOT occupied
+ 939:ks0108b.c     ****         // by new image data
+ 940:ks0108b.c     ****         mask_top = mask_bot << shift_top;
+ 1574               		.loc 1 940 0
+ 1575 0536 EFEF      		ldi r30,lo8(-1)
+ 1576 0538 F0E0      		ldi r31,0
+ 1577 053a 8E2E      		mov r8,r30
+ 1578 053c 052C      		mov r0,r5
+ 1579 053e 00C0      		rjmp 2f
+ 1580               		1:
+ 1581 0540 880C      		lsl r8
+ 1582               		2:
+ 1583 0542 0A94      		dec r0
+ 1584 0544 02F4      		brpl 1b
+ 1585               	.LVL180:
+ 941:ks0108b.c     ****         if (((height+y) & 7) != 0)
+ 1586               		.loc 1 941 0
+ 1587 0546 862F      		mov r24,r22
+ 1588               	.LVL181:
+ 1589 0548 90E0      		ldi r25,0
+ 1590 054a 820F      		add r24,r18
+ 1591 054c 911D      		adc r25,__zero_reg__
+ 1592 054e 8770      		andi r24,7
+ 1593 0550 9927      		clr r25
+ 1594 0552 0097      		sbiw r24,0
+ 1595 0554 01F0      		breq .L97
+ 942:ks0108b.c     ****         {
+ 943:ks0108b.c     ****             // mask_bot needs to have 0's for each pixel in the bottom row NOT
+ 944:ks0108b.c     ****             // occupied by new image data
+ 945:ks0108b.c     ****             mask_bot >>= (8 - ((height + y) & 7));
+ 1596               		.loc 1 945 0
+ 1597 0556 28E0      		ldi r18,lo8(8)
+ 1598 0558 30E0      		ldi r19,0
+ 1599               	.LVL182:
+ 1600 055a 281B      		sub r18,r24
+ 1601 055c 390B      		sbc r19,r25
+ 1602 055e DF01      		movw r26,r30
+ 1603 0560 00C0      		rjmp 2f
+ 1604               		1:
+ 1605 0562 B595      		asr r27
+ 1606 0564 A795      		ror r26
+ 1607               		2:
+ 1608 0566 2A95      		dec r18
+ 1609 0568 02F4      		brpl 1b
+ 1610 056a 7A2E      		mov r7,r26
+ 1611               	.LVL183:
+ 1612 056c 00C0      		rjmp .L73
+ 1613               	.LVL184:
+ 1614               	.L97:
+ 937:ks0108b.c     ****         mask_bot = 0xff;
+ 1615               		.loc 1 937 0
+ 1616 056e 7724      		clr r7
+ 1617 0570 7A94      		dec r7
+ 1618               	.LVL185:
+ 1619               	.L73:
+ 946:ks0108b.c     ****         }
+ 947:ks0108b.c     ****     }
+ 948:ks0108b.c     **** 
+ 949:ks0108b.c     ****     // Determine the source of the data
+ 950:ks0108b.c     ****     if (mode & MODE_FILL)
+ 1620               		.loc 1 950 0
+ 1621 0572 53FF      		sbrs r21,3
+ 1622 0574 00C0      		rjmp .L74
+ 951:ks0108b.c     ****     {
+ 952:ks0108b.c     ****         // Knock off the fill mode. 
+ 953:ks0108b.c     ****         mode &= ~MODE_FILL;
+ 1623               		.loc 1 953 0
+ 1624 0576 577F      		andi r21,lo8(-9)
+ 1625               	.LVL186:
+ 954:ks0108b.c     ****         
+ 955:ks0108b.c     ****         // Re-form the data that was passed. This would be better taken out
+ 956:ks0108b.c     ****         // of the loop as it is static.
+ 957:ks0108b.c     ****         data[0] = (data[0] << shift_top) | (data[0] >> shift_bot);
+ 1626               		.loc 1 957 0
+ 1627 0578 EF85      		ldd r30,Y+15
+ 1628 057a F889      		ldd r31,Y+16
+ 1629 057c 8081      		ld r24,Z
+ 1630 057e 90E0      		ldi r25,0
+ 1631 0580 9C01      		movw r18,r24
+ 1632 0582 0F2C      		mov r0,r15
+ 1633 0584 00C0      		rjmp 2f
+ 1634               		1:
+ 1635 0586 3595      		asr r19
+ 1636 0588 2795      		ror r18
+ 1637               		2:
+ 1638 058a 0A94      		dec r0
+ 1639 058c 02F4      		brpl 1b
+ 1640 058e 052C      		mov r0,r5
+ 1641 0590 00C0      		rjmp 2f
+ 1642               		1:
+ 1643 0592 880F      		lsl r24
+ 1644               		2:
+ 1645 0594 0A94      		dec r0
+ 1646 0596 02F4      		brpl 1b
+ 1647 0598 822B      		or r24,r18
+ 1648 059a 8083      		st Z,r24
+ 1649               	.LVL187:
+ 958:ks0108b.c     ****         source = SOURCE_DATA_BYTE;
+ 1650               		.loc 1 958 0
+ 1651 059c 1982      		std Y+1,__zero_reg__
+ 1652 059e 00C0      		rjmp .L75
+ 1653               	.LVL188:
+ 1654               	.L74:
+ 959:ks0108b.c     ****     }
+ 960:ks0108b.c     ****     // Source is the data pointer
+ 961:ks0108b.c     ****     else if (data != NULL)
+ 1655               		.loc 1 961 0
+ 1656 05a0 8F85      		ldd r24,Y+15
+ 1657 05a2 9889      		ldd r25,Y+16
+ 1658 05a4 892B      		or r24,r25
+ 1659 05a6 01F4      		brne .L98
+ 902:ks0108b.c     ****     uint8_t source = SOURCE_SERIAL;     // Source of the data
+ 1660               		.loc 1 902 0
+ 1661 05a8 92E0      		ldi r25,lo8(2)
+ 1662 05aa 9983      		std Y+1,r25
+ 1663 05ac 00C0      		rjmp .L75
+ 1664               	.L98:
+ 962:ks0108b.c     ****         source = SOURCE_DATA_PTR;
+ 1665               		.loc 1 962 0
+ 1666 05ae A1E0      		ldi r26,lo8(1)
+ 1667 05b0 A983      		std Y+1,r26
+ 1668               	.LVL189:
+ 1669               	.L75:
+ 963:ks0108b.c     ****     
+ 964:ks0108b.c     ****     // Loop through all page rows
+ 965:ks0108b.c     ****     offset = 0;                         // Start at the beginning of the data.
+ 966:ks0108b.c     ****     y >>= 3;
+ 1670               		.loc 1 966 0
+ 1671 05b2 6695      		lsr r22
+ 1672 05b4 6695      		lsr r22
+ 1673 05b6 6695      		lsr r22
+ 1674               	.LVL190:
+ 1675 05b8 6887      		std Y+8,r22
+ 1676               	.LVL191:
+ 967:ks0108b.c     ****     for (row = 0; row < page_rows; row++)
+ 1677               		.loc 1 967 0
+ 1678 05ba C12C      		mov r12,__zero_reg__
+ 1679 05bc D12C      		mov r13,__zero_reg__
+ 965:ks0108b.c     ****     offset = 0;                         // Start at the beginning of the data.
+ 1680               		.loc 1 965 0
+ 1681 05be A12C      		mov r10,__zero_reg__
+ 1682 05c0 B12C      		mov r11,__zero_reg__
+ 903:ks0108b.c     ****     uint8_t operation = 0;              // The operation required.
+ 1683               		.loc 1 903 0
+ 1684 05c2 10E0      		ldi r17,0
+ 1685               	.LBB36:
+ 968:ks0108b.c     ****     {
+ 969:ks0108b.c     ****         uint8_t mask;                   // The mask to be applied to the data.
+ 970:ks0108b.c     **** 
+ 971:ks0108b.c     ****         // The basic operation is zero so use the shift_top to initialise.
+ 972:ks0108b.c     ****         operation = shift_top;
+ 973:ks0108b.c     ****             
+ 974:ks0108b.c     ****         // Set up the operation.
+ 975:ks0108b.c     ****         if (row == 0)
+ 976:ks0108b.c     ****         {
+ 977:ks0108b.c     ****             // TOP: If this is the first row, we need to mask off the blank
+ 978:ks0108b.c     ****             // pixels at the top of the row (these pix have random data).
+ 979:ks0108b.c     ****             // mask_top has shift blank pixels starting from LSB (LSB is the
+ 980:ks0108b.c     ****             // top of the stripe) 
+ 981:ks0108b.c     ****             mask = mask_top;
+ 982:ks0108b.c     ****             if (operation != OPERATION_ALIGNED)
+ 983:ks0108b.c     ****             {
+ 984:ks0108b.c     ****                 // Special case of height < 8 then we render as a bottom line
+ 985:ks0108b.c     ****                 // rather than top. 
+ 986:ks0108b.c     ****                 if (page_rows == 1)
+ 987:ks0108b.c     ****                     operation = OPERATION_BOTTOM;
+ 988:ks0108b.c     ****                 else
+ 989:ks0108b.c     ****                     operation = OPERATION_TOP;
+ 990:ks0108b.c     ****                 // This is a partial row so merge.
+ 991:ks0108b.c     ****                 mode |= MODE_MERGE;
+ 992:ks0108b.c     ****             }
+ 993:ks0108b.c     ****             // Special case of height < 8 then render as bottom line. 
+ 994:ks0108b.c     ****             else if ((page_rows == 1) && ((mask & 0x80) == 0))
+ 995:ks0108b.c     ****             {
+ 996:ks0108b.c     ****                 operation = OPERATION_BOTTOM;
+ 997:ks0108b.c     ****                 mode |= MODE_MERGE;
+ 998:ks0108b.c     ****             }
+ 999:ks0108b.c     ****         }
+1000:ks0108b.c     ****         else if (row == (uint8_t)(page_rows - 1))
+ 1686               		.loc 1 1000 0
+ 1687 05c4 BFEF      		ldi r27,lo8(-1)
+ 1688 05c6 B90D      		add r27,r9
+ 1689 05c8 B987      		std Y+9,r27
+ 1690               	.LBB37:
+1001:ks0108b.c     ****         {
+1002:ks0108b.c     ****             // BOTTOM: If this is the last row, we need to maks off the blank
+1003:ks0108b.c     ****             // pixels at the bottom of the image. mask_bot has blank pixels
+1004:ks0108b.c     ****             // starting at MSB (MSB is the bottom of the stripe) 
+1005:ks0108b.c     ****             mask = mask_bot;
+1006:ks0108b.c     ****             
+1007:ks0108b.c     ****             // If the bottom mask does not extend to the bottom line then a
+1008:ks0108b.c     ****             // merge is required. 
+1009:ks0108b.c     ****             if ((mask & 0x80) == 0)
+1010:ks0108b.c     ****                 mode |= MODE_MERGE;
+1011:ks0108b.c     ****             
+1012:ks0108b.c     ****             // If this is not aligned then determine the type of operation
+1013:ks0108b.c     ****             // required. 
+1014:ks0108b.c     ****             if (operation != OPERATION_ALIGNED)
+1015:ks0108b.c     ****             {
+1016:ks0108b.c     ****                 // If we have an exact match of image rows to pages rows then
+1017:ks0108b.c     ****                 // treat as a middle line. The other condition we have more
+1018:ks0108b.c     ****                 // page rows than image rows so we perform a bottom line
+1019:ks0108b.c     ****                 // operation. 
+1020:ks0108b.c     ****                 if ((row != 0) && (image_rows == page_rows))
+1021:ks0108b.c     ****                     operation = OPERATION_MIDDLE;
+1022:ks0108b.c     ****                 else
+1023:ks0108b.c     ****                     operation = OPERATION_BOTTOM;
+1024:ks0108b.c     ****             }
+1025:ks0108b.c     ****         }
+1026:ks0108b.c     ****         else  
+1027:ks0108b.c     ****         {
+1028:ks0108b.c     ****             // MIDDLE: Accept the whole image stripe
+1029:ks0108b.c     ****             mask = 0xff;
+1030:ks0108b.c     ****             if (operation != OPERATION_ALIGNED)
+1031:ks0108b.c     ****                 operation = OPERATION_MIDDLE;
+1032:ks0108b.c     ****             // Do not need to force a merge in the middle of the line.
+1033:ks0108b.c     ****             mode &= ~MODE_MERGE;
+1034:ks0108b.c     ****         }
+1035:ks0108b.c     ****         
+1036:ks0108b.c     ****         // Loop for columns
+1037:ks0108b.c     ****         for (col = 0; col < width; col++)
+1038:ks0108b.c     ****         {
+1039:ks0108b.c     ****             uint8_t temp;               // The currently process column data
+1040:ks0108b.c     ****             
+1041:ks0108b.c     ****             if (source < SOURCE_DATA_PTR)
+1042:ks0108b.c     ****             {
+1043:ks0108b.c     ****                 // Use the static data that was passed.
+1044:ks0108b.c     ****                 temp = *data;
+1045:ks0108b.c     ****             }
+1046:ks0108b.c     ****             else if (source == SOURCE_DATA_PTR)
+1047:ks0108b.c     ****             {
+1048:ks0108b.c     ****                 // Handle the data passed in 
+1049:ks0108b.c     ****                 
+1050:ks0108b.c     ****                 // Operation 1: Not aligned, process the top row only.
+1051:ks0108b.c     ****                 if (operation == OPERATION_TOP)
+1052:ks0108b.c     ****                 {
+1053:ks0108b.c     ****                     // Get the data for the first row for the bottom of the
+1054:ks0108b.c     ****                     // page. 
+1055:ks0108b.c     ****                     temp = data[col] << shift_top;
+1056:ks0108b.c     ****                 }
+1057:ks0108b.c     ****                 else
+1058:ks0108b.c     ****                 {
+1059:ks0108b.c     ****                     // Get the data from the current position for the top of
+1060:ks0108b.c     ****                     // the page. 
+1061:ks0108b.c     ****                     temp = data[offset];
+1062:ks0108b.c     ****                     
+1063:ks0108b.c     ****                     if (operation > OPERATION_ALIGNED)
+1064:ks0108b.c     ****                     {
+1065:ks0108b.c     ****                         // Operation 2: Not aligned, look ahead. If we are
+1066:ks0108b.c     ****                         // mid row (not first or last) and non-aligned then
+1067:ks0108b.c     ****                         // look ahead and get the bottom of the column from
+1068:ks0108b.c     ****                         // the next byte that is in the RX buffer. This will
+1069:ks0108b.c     ****                         // be exactly 'width' bytes ahead. 
+1070:ks0108b.c     ****                         if (operation == OPERATION_MIDDLE)
+1071:ks0108b.c     ****                         {
+1072:ks0108b.c     ****                             // Get the data for the bottom from the next row.
+1073:ks0108b.c     ****                             temp >>= shift_bot;
+1074:ks0108b.c     ****                             temp |= data[offset + width] << shift_top;
+1075:ks0108b.c     ****                         }
+1076:ks0108b.c     ****                         // Operation 1: Not aligned. 
+1077:ks0108b.c     ****                         else
+1078:ks0108b.c     ****                             temp = (temp << shift_top) | (temp >> shift_bot);
+1079:ks0108b.c     ****                     }
+1080:ks0108b.c     ****                     
+1081:ks0108b.c     ****                     // Operation 3: Aligned data pass through without relocating.
+1082:ks0108b.c     ****                     // Move to the next.
+1083:ks0108b.c     ****                     offset++;
+1084:ks0108b.c     ****                 }
+1085:ks0108b.c     ****             }
+1086:ks0108b.c     ****             else
+1087:ks0108b.c     ****             {
+1088:ks0108b.c     ****                 // Handle the passed from the serial.
+1089:ks0108b.c     ****                 
+1090:ks0108b.c     ****                 // Operation 1: Not aligned, process the top row only.
+1091:ks0108b.c     ****                 if (operation == OPERATION_TOP)
+1092:ks0108b.c     ****                 {
+1093:ks0108b.c     ****                     temp = serial_peek (col) << shift_top;
+1094:ks0108b.c     ****                 }
+1095:ks0108b.c     ****                 else
+1096:ks0108b.c     ****                 {
+1097:ks0108b.c     ****                     // Read a byte from the serial and align with the page
+1098:ks0108b.c     ****                     // boundary.
+1099:ks0108b.c     ****                     temp = serial_getc ();
+1100:ks0108b.c     **** 
+1101:ks0108b.c     ****                     if (operation > OPERATION_ALIGNED)
+1102:ks0108b.c     ****                     {
+1103:ks0108b.c     ****                         // Operation 2: Not aligned, look ahead. If we are
+1104:ks0108b.c     ****                         // mid row (not first or last) and non-aligned then
+1105:ks0108b.c     ****                         // look ahead and get the bottom of the column from
+1106:ks0108b.c     ****                         // the next byte that is in the RX buffer. This will
+1107:ks0108b.c     ****                         // be exactly 'width' bytes ahead. 
+1108:ks0108b.c     ****                         if (operation == OPERATION_MIDDLE)
+1109:ks0108b.c     ****                         {
+1110:ks0108b.c     ****                             // Read the value of the data ahead of us and
+1111:ks0108b.c     ****                             // shift into the correct position. 
+1112:ks0108b.c     ****                             temp >>= shift_bot;
+1113:ks0108b.c     ****                             temp |= serial_peek (width - 1) << shift_top;
+ 1691               		.loc 1 1113 0
+ 1692 05ca E62D      		mov r30,r6
+ 1693 05cc F0E0      		ldi r31,0
+ 1694 05ce FE83      		std Y+6,r31
+ 1695 05d0 ED83      		std Y+5,r30
+ 1696 05d2 3197      		sbiw r30,1
+ 1697 05d4 FB87      		std Y+11,r31
+ 1698 05d6 EA87      		std Y+10,r30
+ 1699               	.LVL192:
+ 1700               	.L76:
+ 1701 05d8 8C2D      		mov r24,r12
+ 1702 05da 9885      		ldd r25,Y+8
+ 1703 05dc 9C0D      		add r25,r12
+ 1704 05de 9A83      		std Y+2,r25
+ 1705               	.LVL193:
+ 1706               	.LBE37:
+ 1707               	.LBE36:
+ 967:ks0108b.c     ****     for (row = 0; row < page_rows; row++)
+ 1708               		.loc 1 967 0 discriminator 1
+ 1709 05e0 C914      		cp r12,r9
+ 1710 05e2 00F0      		brlo .+2
+ 1711 05e4 00C0      		rjmp .L120
+ 1712               	.LVL194:
+ 1713               	.LBB39:
+ 975:ks0108b.c     ****         if (row == 0)
+ 1714               		.loc 1 975 0
+ 1715 05e6 8111      		cpse r24,__zero_reg__
+ 1716 05e8 00C0      		rjmp .L77
+ 1717               	.LVL195:
+ 982:ks0108b.c     ****             if (operation != OPERATION_ALIGNED)
+ 1718               		.loc 1 982 0
+ 1719 05ea 5520      		tst r5
+ 1720 05ec 01F0      		breq .L78
+ 986:ks0108b.c     ****                 if (page_rows == 1)
+ 1721               		.loc 1 986 0
+ 1722 05ee F1E0      		ldi r31,lo8(1)
+ 1723 05f0 9F12      		cpse r9,r31
+ 1724 05f2 00C0      		rjmp .L99
+ 987:ks0108b.c     ****                     operation = OPERATION_BOTTOM;
+ 1725               		.loc 1 987 0
+ 1726 05f4 13E0      		ldi r17,lo8(3)
+ 1727 05f6 00C0      		rjmp .L79
+ 1728               	.L99:
+ 989:ks0108b.c     ****                     operation = OPERATION_TOP;
+ 1729               		.loc 1 989 0
+ 1730 05f8 11E0      		ldi r17,lo8(1)
+ 1731               	.L79:
+ 1732               	.LVL196:
+ 991:ks0108b.c     ****                 mode |= MODE_MERGE;
+ 1733               		.loc 1 991 0 discriminator 1
+ 1734 05fa 5061      		ori r21,lo8(16)
+ 1735               	.LVL197:
+ 1736 05fc 082D      		mov r16,r8
+ 1737 05fe 00C0      		rjmp .L80
+ 1738               	.LVL198:
+ 1739               	.L78:
+ 994:ks0108b.c     ****             else if ((page_rows == 1) && ((mask & 0x80) == 0))
+ 1740               		.loc 1 994 0
+ 1741 0600 81E0      		ldi r24,lo8(1)
+ 1742 0602 9812      		cpse r9,r24
+ 1743 0604 00C0      		rjmp .L101
+ 994:ks0108b.c     ****             else if ((page_rows == 1) && ((mask & 0x80) == 0))
+ 1744               		.loc 1 994 0 is_stmt 0 discriminator 1
+ 1745 0606 87FC      		sbrc r8,7
+ 1746 0608 00C0      		rjmp .L101
+ 1747               	.LVL199:
+ 997:ks0108b.c     ****                 mode |= MODE_MERGE;
+ 1748               		.loc 1 997 0 is_stmt 1
+ 1749 060a 5061      		ori r21,lo8(16)
+ 1750               	.LVL200:
+ 1751 060c 082D      		mov r16,r8
+ 1752 060e 00C0      		rjmp .L103
+ 1753               	.LVL201:
+ 1754               	.L77:
+1000:ks0108b.c     ****         else if (row == (uint8_t)(page_rows - 1))
+ 1755               		.loc 1 1000 0
+ 1756 0610 9985      		ldd r25,Y+9
+ 1757               	.LVL202:
+ 1758 0612 8913      		cpse r24,r25
+ 1759 0614 00C0      		rjmp .L81
+ 1760               	.LVL203:
+1009:ks0108b.c     ****             if ((mask & 0x80) == 0)
+ 1761               		.loc 1 1009 0
+ 1762 0616 AFEF      		ldi r26,lo8(-1)
+ 1763 0618 7A12      		cpse r7,r26
+1010:ks0108b.c     ****                 mode |= MODE_MERGE;
+ 1764               		.loc 1 1010 0
+ 1765 061a 5061      		ori r21,lo8(16)
+ 1766               	.LVL204:
+ 1767               	.L82:
+1014:ks0108b.c     ****             if (operation != OPERATION_ALIGNED)
+ 1768               		.loc 1 1014 0
+ 1769 061c 5520      		tst r5
+ 1770 061e 01F0      		breq .L102
+1020:ks0108b.c     ****                 if ((row != 0) && (image_rows == page_rows))
+ 1771               		.loc 1 1020 0 discriminator 1
+ 1772 0620 BF81      		ldd r27,Y+7
+ 1773 0622 072D      		mov r16,r7
+ 1774 0624 B911      		cpse r27,r9
+ 1775 0626 00C0      		rjmp .L103
+1021:ks0108b.c     ****                     operation = OPERATION_MIDDLE;
+ 1776               		.loc 1 1021 0
+ 1777 0628 12E0      		ldi r17,lo8(2)
+ 1778 062a 00C0      		rjmp .L80
+ 1779               	.LVL205:
+ 1780               	.L81:
+1030:ks0108b.c     ****             if (operation != OPERATION_ALIGNED)
+ 1781               		.loc 1 1030 0
+ 1782 062c 5110      		cpse r5,__zero_reg__
+ 1783 062e 00C0      		rjmp .L104
+ 1784 0630 10E0      		ldi r17,0
+ 1785 0632 00C0      		rjmp .L83
+ 1786               	.L104:
+1031:ks0108b.c     ****                 operation = OPERATION_MIDDLE;
+ 1787               		.loc 1 1031 0
+ 1788 0634 12E0      		ldi r17,lo8(2)
+ 1789               	.L83:
+ 1790               	.LVL206:
+1033:ks0108b.c     ****             mode &= ~MODE_MERGE;
+ 1791               		.loc 1 1033 0
+ 1792 0636 5F7E      		andi r21,lo8(-17)
+ 1793               	.LVL207:
+1029:ks0108b.c     ****             mask = 0xff;
+ 1794               		.loc 1 1029 0
+ 1795 0638 0FEF      		ldi r16,lo8(-1)
+ 1796 063a 00C0      		rjmp .L80
+ 1797               	.LVL208:
+ 1798               	.L101:
+ 1799 063c 082D      		mov r16,r8
+ 1800 063e 00C0      		rjmp .L117
+ 1801               	.LVL209:
+ 1802               	.L102:
+ 1803 0640 072D      		mov r16,r7
+ 1804               	.LVL210:
+ 1805               	.L117:
+ 1806 0642 10E0      		ldi r17,0
+ 1807 0644 00C0      		rjmp .L80
+ 1808               	.LVL211:
+ 1809               	.L103:
+1023:ks0108b.c     ****                     operation = OPERATION_BOTTOM;
+ 1810               		.loc 1 1023 0
+ 1811 0646 13E0      		ldi r17,lo8(3)
+ 1812               	.LVL212:
+ 1813               	.L80:
+ 1814 0648 E0E0      		ldi r30,lo8(draw_buffer)
+ 1815 064a F0E0      		ldi r31,hi8(draw_buffer)
+ 1816 064c FC83      		std Y+4,r31
+ 1817 064e EB83      		std Y+3,r30
+1037:ks0108b.c     ****         for (col = 0; col < width; col++)
+ 1818               		.loc 1 1037 0
+ 1819 0650 212C      		mov r2,__zero_reg__
+ 1820 0652 312C      		mov r3,__zero_reg__
+ 1821               	.LVL213:
+ 1822               	.L84:
+1037:ks0108b.c     ****         for (col = 0; col < width; col++)
+ 1823               		.loc 1 1037 0 is_stmt 0 discriminator 1
+ 1824 0654 2614      		cp r2,r6
+ 1825 0656 00F0      		brlo .+2
+ 1826 0658 00C0      		rjmp .L121
+ 1827               	.LBB38:
+1041:ks0108b.c     ****             if (source < SOURCE_DATA_PTR)
+ 1828               		.loc 1 1041 0 is_stmt 1
+ 1829 065a F981      		ldd r31,Y+1
+ 1830 065c F111      		cpse r31,__zero_reg__
+ 1831 065e 00C0      		rjmp .L85
+1044:ks0108b.c     ****                 temp = *data;
+ 1832               		.loc 1 1044 0
+ 1833 0660 AF85      		ldd r26,Y+15
+ 1834 0662 B889      		ldd r27,Y+16
+ 1835 0664 8C91      		ld r24,X
+ 1836               	.LVL214:
+ 1837 0666 00C0      		rjmp .L86
+ 1838               	.LVL215:
+ 1839               	.L85:
+1046:ks0108b.c     ****             else if (source == SOURCE_DATA_PTR)
+ 1840               		.loc 1 1046 0
+ 1841 0668 B981      		ldd r27,Y+1
+ 1842 066a B130      		cpi r27,lo8(1)
+ 1843 066c 01F4      		brne .L87
+1051:ks0108b.c     ****                 if (operation == OPERATION_TOP)
+ 1844               		.loc 1 1051 0
+ 1845 066e 1130      		cpi r17,lo8(1)
+ 1846 0670 01F4      		brne .L88
+ 1847 0672 EF85      		ldd r30,Y+15
+ 1848 0674 F889      		ldd r31,Y+16
+ 1849 0676 E20D      		add r30,r2
+ 1850 0678 F31D      		adc r31,r3
+1055:ks0108b.c     ****                     temp = data[col] << shift_top;
+ 1851               		.loc 1 1055 0
+ 1852 067a 8081      		ld r24,Z
+ 1853 067c 052C      		mov r0,r5
+ 1854 067e 00C0      		rjmp 2f
+ 1855               		1:
+ 1856 0680 880F      		lsl r24
+ 1857               		2:
+ 1858 0682 0A94      		dec r0
+ 1859 0684 02F4      		brpl 1b
+ 1860               	.LVL216:
+ 1861 0686 00C0      		rjmp .L86
+ 1862               	.LVL217:
+ 1863               	.L88:
+1061:ks0108b.c     ****                     temp = data[offset];
+ 1864               		.loc 1 1061 0
+ 1865 0688 2F85      		ldd r18,Y+15
+ 1866 068a 3889      		ldd r19,Y+16
+ 1867 068c 2A0D      		add r18,r10
+ 1868 068e 3B1D      		adc r19,r11
+ 1869 0690 F901      		movw r30,r18
+ 1870 0692 8081      		ld r24,Z
+ 1871               	.LVL218:
+1063:ks0108b.c     ****                     if (operation > OPERATION_ALIGNED)
+ 1872               		.loc 1 1063 0
+ 1873 0694 1123      		tst r17
+ 1874 0696 01F0      		breq .L89
+ 1875 0698 E82F      		mov r30,r24
+ 1876 069a F0E0      		ldi r31,0
+1070:ks0108b.c     ****                         if (operation == OPERATION_MIDDLE)
+ 1877               		.loc 1 1070 0
+ 1878 069c 1230      		cpi r17,lo8(2)
+ 1879 069e 01F4      		brne .L90
+ 1880               	.LVL219:
+1074:ks0108b.c     ****                             temp |= data[offset + width] << shift_top;
+ 1881               		.loc 1 1074 0
+ 1882 06a0 8D81      		ldd r24,Y+5
+ 1883 06a2 9E81      		ldd r25,Y+6
+ 1884               	.LVL220:
+ 1885 06a4 280F      		add r18,r24
+ 1886 06a6 391F      		adc r19,r25
+ 1887 06a8 D901      		movw r26,r18
+ 1888 06aa 8C91      		ld r24,X
+ 1889 06ac 052C      		mov r0,r5
+ 1890 06ae 00C0      		rjmp 2f
+ 1891               		1:
+ 1892 06b0 880F      		lsl r24
+ 1893               		2:
+ 1894 06b2 0A94      		dec r0
+ 1895 06b4 02F4      		brpl 1b
+1073:ks0108b.c     ****                             temp >>= shift_bot;
+ 1896               		.loc 1 1073 0
+ 1897 06b6 0F2C      		mov r0,r15
+ 1898 06b8 00C0      		rjmp 2f
+ 1899               		1:
+ 1900 06ba F595      		asr r31
+ 1901 06bc E795      		ror r30
+ 1902               		2:
+ 1903 06be 0A94      		dec r0
+ 1904 06c0 02F4      		brpl 1b
+ 1905               	.LVL221:
+ 1906 06c2 00C0      		rjmp .L118
+ 1907               	.LVL222:
+ 1908               	.L90:
+1078:ks0108b.c     ****                             temp = (temp << shift_top) | (temp >> shift_bot);
+ 1909               		.loc 1 1078 0
+ 1910 06c4 CF01      		movw r24,r30
+ 1911               	.LVL223:
+ 1912 06c6 0F2C      		mov r0,r15
+ 1913 06c8 00C0      		rjmp 2f
+ 1914               		1:
+ 1915 06ca 9595      		asr r25
+ 1916 06cc 8795      		ror r24
+ 1917               		2:
+ 1918 06ce 0A94      		dec r0
+ 1919 06d0 02F4      		brpl 1b
+ 1920 06d2 052C      		mov r0,r5
+ 1921 06d4 00C0      		rjmp 2f
+ 1922               		1:
+ 1923 06d6 EE0F      		lsl r30
+ 1924               		2:
+ 1925 06d8 0A94      		dec r0
+ 1926 06da 02F4      		brpl 1b
+ 1927               	.LVL224:
+ 1928               	.L118:
+ 1929 06dc 8E2B      		or r24,r30
+ 1930               	.L89:
+1083:ks0108b.c     ****                     offset++;
+ 1931               		.loc 1 1083 0
+ 1932 06de BFEF      		ldi r27,-1
+ 1933 06e0 AB1A      		sub r10,r27
+ 1934 06e2 BB0A      		sbc r11,r27
+ 1935               	.LVL225:
+ 1936 06e4 00C0      		rjmp .L86
+ 1937               	.L87:
+1091:ks0108b.c     ****                 if (operation == OPERATION_TOP)
+ 1938               		.loc 1 1091 0
+ 1939 06e6 1130      		cpi r17,lo8(1)
+ 1940 06e8 01F4      		brne .L91
+1093:ks0108b.c     ****                     temp = serial_peek (col) << shift_top;
+ 1941               		.loc 1 1093 0
+ 1942 06ea C101      		movw r24,r2
+ 1943 06ec 5E87      		std Y+14,r21
+ 1944 06ee 0E94 0000 		call serial_peek
+ 1945               	.LVL226:
+ 1946 06f2 052C      		mov r0,r5
+ 1947 06f4 00C0      		rjmp 2f
+ 1948               		1:
+ 1949 06f6 880F      		lsl r24
+ 1950               		2:
+ 1951 06f8 0A94      		dec r0
+ 1952 06fa 02F4      		brpl 1b
+ 1953 06fc 00C0      		rjmp .L119
+ 1954               	.L91:
+1099:ks0108b.c     ****                     temp = serial_getc ();
+ 1955               		.loc 1 1099 0
+ 1956 06fe 5E87      		std Y+14,r21
+ 1957 0700 0E94 0000 		call serial_getc
+ 1958               	.LVL227:
+1101:ks0108b.c     ****                     if (operation > OPERATION_ALIGNED)
+ 1959               		.loc 1 1101 0
+ 1960 0704 5E85      		ldd r21,Y+14
+ 1961 0706 1123      		tst r17
+ 1962 0708 01F0      		breq .L86
+ 1963 070a 282F      		mov r18,r24
+ 1964 070c 30E0      		ldi r19,0
+1108:ks0108b.c     ****                         if (operation == OPERATION_MIDDLE)
+ 1965               		.loc 1 1108 0
+ 1966 070e 1230      		cpi r17,lo8(2)
+ 1967 0710 01F4      		brne .L92
+ 1968               	.LVL228:
+ 1969               		.loc 1 1113 0
+ 1970 0712 8A85      		ldd r24,Y+10
+ 1971 0714 9B85      		ldd r25,Y+11
+ 1972               	.LVL229:
+ 1973 0716 2C87      		std Y+12,r18
+ 1974 0718 3D87      		std Y+13,r19
+ 1975 071a 0E94 0000 		call serial_peek
+ 1976               	.LVL230:
+ 1977 071e 052C      		mov r0,r5
+ 1978 0720 00C0      		rjmp 2f
+ 1979               		1:
+ 1980 0722 880F      		lsl r24
+ 1981               		2:
+ 1982 0724 0A94      		dec r0
+ 1983 0726 02F4      		brpl 1b
+1112:ks0108b.c     ****                             temp >>= shift_bot;
+ 1984               		.loc 1 1112 0
+ 1985 0728 2C85      		ldd r18,Y+12
+ 1986 072a 3D85      		ldd r19,Y+13
+ 1987 072c 0F2C      		mov r0,r15
+ 1988 072e 00C0      		rjmp 2f
+ 1989               		1:
+ 1990 0730 3595      		asr r19
+ 1991 0732 2795      		ror r18
+ 1992               		2:
+ 1993 0734 0A94      		dec r0
+ 1994 0736 02F4      		brpl 1b
+ 1995               		.loc 1 1113 0
+ 1996 0738 822B      		or r24,r18
+ 1997               	.L119:
+ 1998 073a 5E85      		ldd r21,Y+14
+ 1999 073c 00C0      		rjmp .L86
+ 2000               	.LVL231:
+ 2001               	.L92:
+1114:ks0108b.c     ****                         }
+1115:ks0108b.c     ****                         else
+1116:ks0108b.c     ****                         {
+1117:ks0108b.c     ****                             // Bottom line.
+1118:ks0108b.c     ****                             temp = (temp << shift_top) | (temp >> shift_bot);
+ 2002               		.loc 1 1118 0
+ 2003 073e F901      		movw r30,r18
+ 2004 0740 0F2C      		mov r0,r15
+ 2005 0742 00C0      		rjmp 2f
+ 2006               		1:
+ 2007 0744 F595      		asr r31
+ 2008 0746 E795      		ror r30
+ 2009               		2:
+ 2010 0748 0A94      		dec r0
+ 2011 074a 02F4      		brpl 1b
+ 2012 074c 052C      		mov r0,r5
+ 2013 074e 00C0      		rjmp 2f
+ 2014               		1:
+ 2015 0750 220F      		lsl r18
+ 2016               		2:
+ 2017 0752 0A94      		dec r0
+ 2018 0754 02F4      		brpl 1b
+ 2019               	.LVL232:
+ 2020 0756 8E2F      		mov r24,r30
+ 2021 0758 822B      		or r24,r18
+ 2022               	.LVL233:
+ 2023               	.L86:
+1119:ks0108b.c     ****                         }
+1120:ks0108b.c     ****                     }
+1121:ks0108b.c     ****                 }
+1122:ks0108b.c     ****             }
+1123:ks0108b.c     ****             // Write the data to the buffer
+1124:ks0108b.c     ****             draw_buffer[col] = temp;
+ 2024               		.loc 1 1124 0
+ 2025 075a EB81      		ldd r30,Y+3
+ 2026 075c FC81      		ldd r31,Y+4
+ 2027 075e 8193      		st Z+,r24
+ 2028 0760 FC83      		std Y+4,r31
+ 2029 0762 EB83      		std Y+3,r30
+ 2030               	.LVL234:
+ 2031 0764 FFEF      		ldi r31,-1
+ 2032 0766 2F1A      		sub r2,r31
+ 2033 0768 3F0A      		sbc r3,r31
+ 2034               	.LVL235:
+ 2035 076a 00C0      		rjmp .L84
+ 2036               	.L121:
+ 2037               	.LBE38:
+1125:ks0108b.c     ****         }
+1126:ks0108b.c     ****             
+1127:ks0108b.c     ****         // If NULL was passed for data, take it from the serial port. It is
+1128:ks0108b.c     ****         // necessary to have 2 rows of data, current and previous to do
+1129:ks0108b.c     ****         // bitblt since 0<width<128 (display is only 128 wide), we can use
+1130:ks0108b.c     ****         // the second 128 bytes in buffer to hold the previous row
+1131:ks0108b.c     ****         //
+1132:ks0108b.c     ****         // Read the row in (background image data). Skip the read if we are
+1133:ks0108b.c     ****         // writing a complete row and we are not mxing in any pixels. We
+1134:ks0108b.c     ****         // perform the read when (merge mode) || (first row shifted) || (last
+1135:ks0108b.c     ****         // row shifted).
+1136:ks0108b.c     ****         if ((mode & (MODE_OP_MASK|MODE_MERGE)) != 0)
+ 2038               		.loc 1 1136 0
+ 2039 076c 852F      		mov r24,r21
+ 2040 076e 8671      		andi r24,lo8(22)
+ 2041 0770 01F0      		breq .L94
+1137:ks0108b.c     ****         {
+1138:ks0108b.c     ****             // We need to perfom some mixing so read the data.
+1139:ks0108b.c     ****             read_block (x, y, width, draw_buffer, mask, mode);
+ 2042               		.loc 1 1139 0
+ 2043 0772 E52E      		mov r14,r21
+ 2044 0774 20E0      		ldi r18,lo8(draw_buffer)
+ 2045 0776 30E0      		ldi r19,hi8(draw_buffer)
+ 2046 0778 462D      		mov r20,r6
+ 2047 077a 6A81      		ldd r22,Y+2
+ 2048 077c 842D      		mov r24,r4
+ 2049 077e 5E87      		std Y+14,r21
+ 2050 0780 0E94 0000 		call read_block
+ 2051               	.LVL236:
+ 2052 0784 5E85      		ldd r21,Y+14
+ 2053               	.L94:
+1140:ks0108b.c     ****         }
+1141:ks0108b.c     ****         // Write the data back.
+1142:ks0108b.c     ****         write_block (x, y, width, draw_buffer, mode & (MODE_OP_MASK | MODE_NORMAL));
+ 2054               		.loc 1 1142 0
+ 2055 0786 052F      		mov r16,r21
+ 2056               	.LVL237:
+ 2057 0788 0770      		andi r16,lo8(7)
+ 2058 078a 20E0      		ldi r18,lo8(draw_buffer)
+ 2059 078c 30E0      		ldi r19,hi8(draw_buffer)
+ 2060 078e 462D      		mov r20,r6
+ 2061 0790 6A81      		ldd r22,Y+2
+ 2062 0792 842D      		mov r24,r4
+ 2063 0794 5E87      		std Y+14,r21
+ 2064 0796 0E94 0000 		call write_block
+ 2065               	.LVL238:
+ 2066 079a 8FEF      		ldi r24,-1
+ 2067 079c C81A      		sub r12,r24
+ 2068 079e D80A      		sbc r13,r24
+ 2069               	.LVL239:
+ 2070 07a0 5E85      		ldd r21,Y+14
+ 2071 07a2 00C0      		rjmp .L76
+ 2072               	.LVL240:
+ 2073               	.L120:
+ 2074               	.LBE39:
+1143:ks0108b.c     ****         y++;
+1144:ks0108b.c     ****     }//row loop
+1145:ks0108b.c     ****     
+1146:ks0108b.c     ****     // Clean the serial if there is any pending data not consumed.
+1147:ks0108b.c     ****     if ((source == SOURCE_SERIAL) && (operation == OPERATION_MIDDLE))
+ 2075               		.loc 1 1147 0
+ 2076 07a4 A981      		ldd r26,Y+1
+ 2077 07a6 A230      		cpi r26,lo8(2)
+ 2078 07a8 01F4      		brne .L71
+ 2079               		.loc 1 1147 0 is_stmt 0 discriminator 1
+ 2080 07aa 1230      		cpi r17,lo8(2)
+ 2081 07ac 01F4      		brne .L71
+1148:ks0108b.c     ****         serial_flushc (width);
+ 2082               		.loc 1 1148 0 is_stmt 1
+ 2083 07ae 862D      		mov r24,r6
+ 2084               	/* epilogue start */
+1149:ks0108b.c     **** }
+ 2085               		.loc 1 1149 0
+ 2086 07b0 6096      		adiw r28,16
+ 2087 07b2 0FB6      		in __tmp_reg__,__SREG__
+ 2088 07b4 F894      		cli
+ 2089 07b6 DEBF      		out __SP_H__,r29
+ 2090 07b8 0FBE      		out __SREG__,__tmp_reg__
+ 2091 07ba CDBF      		out __SP_L__,r28
+ 2092 07bc DF91      		pop r29
+ 2093 07be CF91      		pop r28
+ 2094 07c0 1F91      		pop r17
+ 2095               	.LVL241:
+ 2096 07c2 0F91      		pop r16
+ 2097 07c4 FF90      		pop r15
+ 2098               	.LVL242:
+ 2099 07c6 EF90      		pop r14
+ 2100 07c8 DF90      		pop r13
+ 2101 07ca CF90      		pop r12
+ 2102               	.LVL243:
+ 2103 07cc BF90      		pop r11
+ 2104 07ce AF90      		pop r10
+ 2105               	.LVL244:
+ 2106 07d0 9F90      		pop r9
+ 2107               	.LVL245:
+ 2108 07d2 8F90      		pop r8
+ 2109               	.LVL246:
+ 2110 07d4 7F90      		pop r7
+ 2111               	.LVL247:
+ 2112 07d6 6F90      		pop r6
+ 2113               	.LVL248:
+ 2114 07d8 5F90      		pop r5
+ 2115               	.LVL249:
+ 2116 07da 4F90      		pop r4
+ 2117               	.LVL250:
+ 2118 07dc 3F90      		pop r3
+ 2119 07de 2F90      		pop r2
+1148:ks0108b.c     ****         serial_flushc (width);
+ 2120               		.loc 1 1148 0
+ 2121 07e0 0C94 0000 		jmp serial_flushc
+ 2122               	.LVL251:
+ 2123               	.L71:
+ 2124               	/* epilogue start */
+ 2125               		.loc 1 1149 0
+ 2126 07e4 6096      		adiw r28,16
+ 2127 07e6 0FB6      		in __tmp_reg__,__SREG__
+ 2128 07e8 F894      		cli
+ 2129 07ea DEBF      		out __SP_H__,r29
+ 2130 07ec 0FBE      		out __SREG__,__tmp_reg__
+ 2131 07ee CDBF      		out __SP_L__,r28
+ 2132 07f0 DF91      		pop r29
+ 2133 07f2 CF91      		pop r28
+ 2134 07f4 1F91      		pop r17
+ 2135               	.LVL252:
+ 2136 07f6 0F91      		pop r16
+ 2137 07f8 FF90      		pop r15
+ 2138               	.LVL253:
+ 2139 07fa EF90      		pop r14
+ 2140 07fc DF90      		pop r13
+ 2141 07fe CF90      		pop r12
+ 2142               	.LVL254:
+ 2143 0800 BF90      		pop r11
+ 2144 0802 AF90      		pop r10
+ 2145               	.LVL255:
+ 2146 0804 9F90      		pop r9
+ 2147               	.LVL256:
+ 2148 0806 8F90      		pop r8
+ 2149               	.LVL257:
+ 2150 0808 7F90      		pop r7
+ 2151               	.LVL258:
+ 2152 080a 6F90      		pop r6
+ 2153               	.LVL259:
+ 2154 080c 5F90      		pop r5
+ 2155               	.LVL260:
+ 2156 080e 4F90      		pop r4
+ 2157               	.LVL261:
+ 2158 0810 3F90      		pop r3
+ 2159 0812 2F90      		pop r2
+ 2160 0814 0895      		ret
+ 2161               		.cfi_endproc
+ 2162               	.LFE24:
+ 2164               	.global	ks0108b_hline
+ 2166               	ks0108b_hline:
+ 2167               	.LFB25:
+1150:ks0108b.c     **** 
+1151:ks0108b.c     **** /////////////////////////////////////////////////////////////////////////////
+1152:ks0108b.c     **** /// Draw a horizontal line
+1153:ks0108b.c     **** ///
+1154:ks0108b.c     **** /// @param [in] x The first x-coordinate.
+1155:ks0108b.c     **** /// @param [in] y The first y-coordinate.
+1156:ks0108b.c     **** /// @param [in] x1 The 2nd x-coordinate.
+1157:ks0108b.c     **** /// @param [in] mode The drawing mode.
+1158:ks0108b.c     **** ///
+1159:ks0108b.c     **** void
+1160:ks0108b.c     **** ks0108b_hline (uint8_t x, uint8_t y, uint8_t x1, uint8_t mode)
+1161:ks0108b.c     **** {
+ 2168               		.loc 1 1161 0
+ 2169               		.cfi_startproc
+ 2170               	.LVL262:
+ 2171 0816 AF92      		push r10
+ 2172               	.LCFI88:
+ 2173               		.cfi_def_cfa_offset 3
+ 2174               		.cfi_offset 10, -2
+ 2175 0818 BF92      		push r11
+ 2176               	.LCFI89:
+ 2177               		.cfi_def_cfa_offset 4
+ 2178               		.cfi_offset 11, -3
+ 2179 081a CF92      		push r12
+ 2180               	.LCFI90:
+ 2181               		.cfi_def_cfa_offset 5
+ 2182               		.cfi_offset 12, -4
+ 2183 081c DF92      		push r13
+ 2184               	.LCFI91:
+ 2185               		.cfi_def_cfa_offset 6
+ 2186               		.cfi_offset 13, -5
+ 2187 081e EF92      		push r14
+ 2188               	.LCFI92:
+ 2189               		.cfi_def_cfa_offset 7
+ 2190               		.cfi_offset 14, -6
+ 2191 0820 FF92      		push r15
+ 2192               	.LCFI93:
+ 2193               		.cfi_def_cfa_offset 8
+ 2194               		.cfi_offset 15, -7
+ 2195 0822 0F93      		push r16
+ 2196               	.LCFI94:
+ 2197               		.cfi_def_cfa_offset 9
+ 2198               		.cfi_offset 16, -8
+ 2199 0824 1F93      		push r17
+ 2200               	.LCFI95:
+ 2201               		.cfi_def_cfa_offset 10
+ 2202               		.cfi_offset 17, -9
+ 2203 0826 CF93      		push r28
+ 2204               	.LCFI96:
+ 2205               		.cfi_def_cfa_offset 11
+ 2206               		.cfi_offset 28, -10
+ 2207 0828 DF93      		push r29
+ 2208               	.LCFI97:
+ 2209               		.cfi_def_cfa_offset 12
+ 2210               		.cfi_offset 29, -11
+ 2211               	/* prologue: function */
+ 2212               	/* frame size = 0 */
+ 2213               	/* stack size = 10 */
+ 2214               	.L__stack_usage = 10
+ 2215 082a F82E      		mov r15,r24
+1162:ks0108b.c     ****     uint8_t ii;
+1163:ks0108b.c     ****     uint8_t pixel_mask;
+1164:ks0108b.c     ****     uint8_t width;
+1165:ks0108b.c     ****     uint8_t width2;
+1166:ks0108b.c     **** 
+1167:ks0108b.c     ****     // Swap the bytes so that we can iterate
+1168:ks0108b.c     ****     if (x > x1)
+ 2216               		.loc 1 1168 0
+ 2217 082c 4817      		cp r20,r24
+ 2218 082e 00F4      		brsh .L123
+1169:ks0108b.c     ****         swap_bytes (x, x1);
+ 2219               		.loc 1 1169 0
+ 2220 0830 F426      		eor r15,r20
+ 2221               	.LVL263:
+ 2222 0832 4F25      		eor r20,r15
+ 2223               	.LVL264:
+ 2224 0834 F426      		eor r15,r20
+ 2225               	.LVL265:
+ 2226               	.L123:
+ 2227               	.LBB40:
+1170:ks0108b.c     **** 
+1171:ks0108b.c     **** #if 0
+1172:ks0108b.c     ****     // Iterate between the two y coordinates.
+1173:ks0108b.c     ****     while (x <= x1)
+1174:ks0108b.c     ****     {
+1175:ks0108b.c     ****         ks0108b_set_pixel (x++, y, mode);
+1176:ks0108b.c     ****     }
+1177:ks0108b.c     ****     return;
+1178:ks0108b.c     **** #endif
+1179:ks0108b.c     **** 
+1180:ks0108b.c     ****     // Calculate the pixel mask to use.
+1181:ks0108b.c     ****     //pixel_mask = 1 << (y & 7);          // Get pixel mask
+1182:ks0108b.c     ****     pixel_mask = pgm_read_byte (&bit_shift_single_maskP[y & 7]);
+ 2228               		.loc 1 1182 0
+ 2229 0836 E62F      		mov r30,r22
+ 2230 0838 E770      		andi r30,lo8(7)
+ 2231 083a F0E0      		ldi r31,0
+ 2232 083c E050      		subi r30,lo8(-(bit_shift_single_maskP))
+ 2233 083e F040      		sbci r31,hi8(-(bit_shift_single_maskP))
+ 2234               	/* #APP */
+ 2235               	 ;  1182 "ks0108b.c" 1
+ 2236 0840 A490      		lpm r10, Z
+ 2237               		
+ 2238               	 ;  0 "" 2
+ 2239               	.LVL266:
+ 2240               	/* #NOAPP */
+ 2241               	.LBE40:
+1183:ks0108b.c     ****     y >>= 3;                            // Convert to column address
+ 2242               		.loc 1 1183 0
+ 2243 0842 C62E      		mov r12,r22
+ 2244 0844 C694      		lsr r12
+ 2245 0846 C694      		lsr r12
+ 2246 0848 C694      		lsr r12
+ 2247               	.LVL267:
+1184:ks0108b.c     **** 
+1185:ks0108b.c     ****     // Write in 64 byte chunks as we do not have enough memory to do a
+1186:ks0108b.c     ****     // complete line. The limit is set by polygon fill which uses 64 bytes of
+1187:ks0108b.c     ****     // the draw buffer.
+1188:ks0108b.c     ****     width = (x1 - x) + 1;               // Calculate the width
+ 2248               		.loc 1 1188 0
+ 2249 084a 11E0      		ldi r17,lo8(1)
+ 2250 084c 140F      		add r17,r20
+ 2251 084e 1F19      		sub r17,r15
+ 2252               	.LVL268:
+1189:ks0108b.c     ****     if (width > 64)
+ 2253               		.loc 1 1189 0
+ 2254 0850 1134      		cpi r17,lo8(65)
+ 2255 0852 00F0      		brlo .L129
+1190:ks0108b.c     ****     {
+1191:ks0108b.c     ****         x1 = 64 - x;
+ 2256               		.loc 1 1191 0
+ 2257 0854 80E4      		ldi r24,lo8(64)
+ 2258 0856 8F19      		sub r24,r15
+ 2259               	.LVL269:
+1192:ks0108b.c     ****         width2 = width - x1;
+ 2260               		.loc 1 1192 0
+ 2261 0858 D12E      		mov r13,r17
+ 2262 085a D81A      		sub r13,r24
+ 2263               	.LVL270:
+1193:ks0108b.c     ****         width = x1;
+ 2264               		.loc 1 1193 0
+ 2265 085c 182F      		mov r17,r24
+ 2266 085e 00C0      		rjmp .L124
+ 2267               	.LVL271:
+ 2268               	.L129:
+1194:ks0108b.c     ****     }
+1195:ks0108b.c     ****     else
+1196:ks0108b.c     ****         width2 = 0;
+ 2269               		.loc 1 1196 0
+ 2270 0860 D12C      		mov r13,__zero_reg__
+ 2271               	.LVL272:
+ 2272               	.L124:
+ 2273 0862 C0E0      		ldi r28,lo8(draw_buffer+64)
+ 2274 0864 D0E0      		ldi r29,hi8(draw_buffer+64)
+1197:ks0108b.c     **** 
+1198:ks0108b.c     ****     // Iterate over both widths if defined.
+1199:ks0108b.c     ****     for (;;)
+1200:ks0108b.c     ****     {
+1201:ks0108b.c     ****         // Set up the buffer for a merge.
+1202:ks0108b.c     ****         for (ii = 0; ii < width; ii++)
+1203:ks0108b.c     ****             draw_buffer [SCREEN_HEIGHT + ii] = pixel_mask;
+1204:ks0108b.c     **** 
+1205:ks0108b.c     ****         // Read the block in with a modification and then write it back.
+1206:ks0108b.c     ****         read_block (x, y, width, &draw_buffer [SCREEN_HEIGHT], pixel_mask, mode | MODE_MERGE);
+ 2275               		.loc 1 1206 0
+ 2276 0866 2061      		ori r18,lo8(16)
+ 2277               	.LVL273:
+ 2278 0868 B22E      		mov r11,r18
+ 2279               	.LVL274:
+ 2280               	.L128:
+1202:ks0108b.c     ****         for (ii = 0; ii < width; ii++)
+ 2281               		.loc 1 1202 0
+ 2282 086a A0E0      		ldi r26,lo8(draw_buffer+64)
+ 2283 086c B0E0      		ldi r27,hi8(draw_buffer+64)
+ 2284               	.LVL275:
+ 2285               	.L125:
+ 2286 086e 8A2F      		mov r24,r26
+ 2287 0870 8C1B      		sub r24,r28
+1202:ks0108b.c     ****         for (ii = 0; ii < width; ii++)
+ 2288               		.loc 1 1202 0 is_stmt 0 discriminator 1
+ 2289 0872 8117      		cp r24,r17
+ 2290 0874 00F4      		brsh .L130
+1203:ks0108b.c     ****             draw_buffer [SCREEN_HEIGHT + ii] = pixel_mask;
+ 2291               		.loc 1 1203 0 is_stmt 1 discriminator 2
+ 2292 0876 AD92      		st X+,r10
+ 2293               	.LVL276:
+ 2294 0878 00C0      		rjmp .L125
+ 2295               	.L130:
+ 2296               		.loc 1 1206 0
+ 2297 087a EB2C      		mov r14,r11
+ 2298 087c 0A2D      		mov r16,r10
+ 2299 087e 20E0      		ldi r18,lo8(draw_buffer+64)
+ 2300 0880 30E0      		ldi r19,hi8(draw_buffer+64)
+ 2301 0882 412F      		mov r20,r17
+ 2302 0884 6C2D      		mov r22,r12
+ 2303 0886 8F2D      		mov r24,r15
+ 2304 0888 0E94 0000 		call read_block
+ 2305               	.LVL277:
+1207:ks0108b.c     ****         write_block (x, y, width, &draw_buffer [SCREEN_HEIGHT], mode | MODE_MERGE);
+ 2306               		.loc 1 1207 0
+ 2307 088c 0B2D      		mov r16,r11
+ 2308 088e 20E0      		ldi r18,lo8(draw_buffer+64)
+ 2309 0890 30E0      		ldi r19,hi8(draw_buffer+64)
+ 2310 0892 412F      		mov r20,r17
+ 2311 0894 6C2D      		mov r22,r12
+ 2312 0896 8F2D      		mov r24,r15
+ 2313 0898 0E94 0000 		call write_block
+ 2314               	.LVL278:
+1208:ks0108b.c     **** 
+1209:ks0108b.c     ****         // See if there is another block to do.
+1210:ks0108b.c     ****         if (width2 == 0)
+ 2315               		.loc 1 1210 0
+ 2316 089c DD20      		tst r13
+ 2317 089e 01F0      		breq .L122
+1211:ks0108b.c     ****             break;
+1212:ks0108b.c     **** 
+1213:ks0108b.c     ****         // Another iteration to be performed. Adjust the width ready for the
+1214:ks0108b.c     ****         // next loop.
+1215:ks0108b.c     ****         x += width;                     // Change the x position.
+ 2318               		.loc 1 1215 0
+ 2319 08a0 F10E      		add r15,r17
+ 2320               	.LVL279:
+1216:ks0108b.c     ****         width = width2;                 // Assume new width.
+ 2321               		.loc 1 1216 0
+ 2322 08a2 1D2D      		mov r17,r13
+1217:ks0108b.c     ****         width2 = 0;                     // Reset width2 so we do not loop again.
+ 2323               		.loc 1 1217 0
+ 2324 08a4 D12C      		mov r13,__zero_reg__
+ 2325               	.LVL280:
+1218:ks0108b.c     ****     }
+ 2326               		.loc 1 1218 0
+ 2327 08a6 00C0      		rjmp .L128
+ 2328               	.LVL281:
+ 2329               	.L122:
+ 2330               	/* epilogue start */
+1219:ks0108b.c     **** }
+ 2331               		.loc 1 1219 0
+ 2332 08a8 DF91      		pop r29
+ 2333 08aa CF91      		pop r28
+ 2334 08ac 1F91      		pop r17
+ 2335               	.LVL282:
+ 2336 08ae 0F91      		pop r16
+ 2337 08b0 FF90      		pop r15
+ 2338               	.LVL283:
+ 2339 08b2 EF90      		pop r14
+ 2340 08b4 DF90      		pop r13
+ 2341               	.LVL284:
+ 2342 08b6 CF90      		pop r12
+ 2343               	.LVL285:
+ 2344 08b8 BF90      		pop r11
+ 2345 08ba AF90      		pop r10
+ 2346               	.LVL286:
+ 2347 08bc 0895      		ret
+ 2348               		.cfi_endproc
+ 2349               	.LFE25:
+ 2351               	.global	ks0108b_vline
+ 2353               	ks0108b_vline:
+ 2354               	.LFB26:
+1220:ks0108b.c     **** 
+1221:ks0108b.c     **** /////////////////////////////////////////////////////////////////////////////
+1222:ks0108b.c     **** /// Draw a vertical line.
+1223:ks0108b.c     **** ///
+1224:ks0108b.c     **** /// @param [in] x The first x-coordinate.
+1225:ks0108b.c     **** /// @param [in] y The first y-coordinate.
+1226:ks0108b.c     **** /// @param [in] y1 The 2nd y-coordinate.
+1227:ks0108b.c     **** /// @param [in] mode The drawing mode.
+1228:ks0108b.c     **** ///
+1229:ks0108b.c     **** void
+1230:ks0108b.c     **** ks0108b_vline (uint8_t x, uint8_t y, uint8_t y1, uint8_t mode)
+1231:ks0108b.c     **** {
+ 2355               		.loc 1 1231 0
+ 2356               		.cfi_startproc
+ 2357               	.LVL287:
+ 2358 08be EF92      		push r14
+ 2359               	.LCFI98:
+ 2360               		.cfi_def_cfa_offset 3
+ 2361               		.cfi_offset 14, -2
+ 2362 08c0 FF92      		push r15
+ 2363               	.LCFI99:
+ 2364               		.cfi_def_cfa_offset 4
+ 2365               		.cfi_offset 15, -3
+ 2366 08c2 0F93      		push r16
+ 2367               	.LCFI100:
+ 2368               		.cfi_def_cfa_offset 5
+ 2369               		.cfi_offset 16, -4
+ 2370 08c4 1F93      		push r17
+ 2371               	.LCFI101:
+ 2372               		.cfi_def_cfa_offset 6
+ 2373               		.cfi_offset 17, -5
+ 2374 08c6 CF93      		push r28
+ 2375               	.LCFI102:
+ 2376               		.cfi_def_cfa_offset 7
+ 2377               		.cfi_offset 28, -6
+ 2378 08c8 DF93      		push r29
+ 2379               	.LCFI103:
+ 2380               		.cfi_def_cfa_offset 8
+ 2381               		.cfi_offset 29, -7
+ 2382               	/* prologue: function */
+ 2383               	/* frame size = 0 */
+ 2384               	/* stack size = 6 */
+ 2385               	.L__stack_usage = 6
+ 2386 08ca 182F      		mov r17,r24
+ 2387 08cc F22E      		mov r15,r18
+1232:ks0108b.c     ****     uint8_t height;                     // Height of the line
+1233:ks0108b.c     **** 
+1234:ks0108b.c     ****     // Swap the bytes so that we can iterate
+1235:ks0108b.c     ****     if (y > y1)
+ 2388               		.loc 1 1235 0
+ 2389 08ce 4617      		cp r20,r22
+ 2390 08d0 00F4      		brsh .L132
+1236:ks0108b.c     ****         swap_bytes (y, y1);
+ 2391               		.loc 1 1236 0
+ 2392 08d2 6427      		eor r22,r20
+ 2393               	.LVL288:
+ 2394 08d4 4627      		eor r20,r22
+ 2395               	.LVL289:
+ 2396 08d6 6427      		eor r22,r20
+ 2397               	.LVL290:
+ 2398               	.L132:
+1237:ks0108b.c     **** 
+1238:ks0108b.c     **** #if 0
+1239:ks0108b.c     ****     // Iterate between the two y coordinates.
+1240:ks0108b.c     ****     while (y <= y1)
+1241:ks0108b.c     ****     {
+1242:ks0108b.c     ****         ks0108b_set_pixel (x, y++, mode);
+1243:ks0108b.c     ****     }
+1244:ks0108b.c     ****     return;
+1245:ks0108b.c     **** #endif
+1246:ks0108b.c     **** 
+1247:ks0108b.c     ****     height = (y1 - y) + 1;              // Calculate the height
+ 2399               		.loc 1 1247 0
+ 2400 08d8 D1E0      		ldi r29,lo8(1)
+ 2401 08da D40F      		add r29,r20
+ 2402 08dc D61B      		sub r29,r22
+ 2403               	.LVL291:
+1248:ks0108b.c     ****     y1 = y & 7;                         // Get offset to start of block
+ 2404               		.loc 1 1248 0
+ 2405 08de 862F      		mov r24,r22
+ 2406               	.LVL292:
+ 2407 08e0 8770      		andi r24,lo8(7)
+ 2408               	.LVL293:
+1249:ks0108b.c     ****     y >>= 3;                            // Get the column index
+ 2409               		.loc 1 1249 0
+ 2410 08e2 C62F      		mov r28,r22
+ 2411 08e4 C695      		lsr r28
+ 2412 08e6 C695      		lsr r28
+ 2413 08e8 C695      		lsr r28
+ 2414               	.LVL294:
+1250:ks0108b.c     **** 
+1251:ks0108b.c     ****     if (y1 != 0)                        // Not on boundary??
+ 2415               		.loc 1 1251 0
+ 2416 08ea 8823      		tst r24
+ 2417 08ec 01F0      		breq .L133
+ 2418               	.LVL295:
+ 2419               	.LBB41:
+ 2420               	.LBB42:
+1252:ks0108b.c     ****     {
+1253:ks0108b.c     ****         uint8_t valid_mask;             // Mask for the valid bits to write.
+1254:ks0108b.c     **** 
+1255:ks0108b.c     ****         // Compute the valid mask i.e. 0xff << x1
+1256:ks0108b.c     ****         valid_mask = ~pgm_read_byte (&bit_shift_maskP[(uint8_t)(8 - y1)]);
+ 2421               		.loc 1 1256 0
+ 2422 08ee E8E0      		ldi r30,lo8(8)
+ 2423 08f0 E81B      		sub r30,r24
+ 2424 08f2 F0E0      		ldi r31,0
+ 2425 08f4 E050      		subi r30,lo8(-(bit_shift_maskP))
+ 2426 08f6 F040      		sbci r31,hi8(-(bit_shift_maskP))
+ 2427               	/* #APP */
+ 2428               	 ;  1256 "ks0108b.c" 1
+ 2429 08f8 4491      		lpm r20, Z
+ 2430               		
+ 2431               	 ;  0 "" 2
+ 2432               	.LVL296:
+ 2433               	/* #NOAPP */
+ 2434               	.LBE42:
+ 2435 08fa 4095      		com r20
+ 2436               	.LVL297:
+1257:ks0108b.c     ****         height += y1;                    // Add the sub-block start to width
+ 2437               		.loc 1 1257 0
+ 2438 08fc D80F      		add r29,r24
+ 2439               	.LVL298:
+1258:ks0108b.c     **** 
+1259:ks0108b.c     ****         // Add any bottom mask if we have a short block
+1260:ks0108b.c     ****         if (height < 8)
+ 2440               		.loc 1 1260 0
+ 2441 08fe D830      		cpi r29,lo8(8)
+ 2442 0900 00F4      		brsh .L134
+ 2443               	.LVL299:
+ 2444               	.LBB43:
+1261:ks0108b.c     ****         {
+1262:ks0108b.c     ****             // This is a short block, the data does not occupy the block.
+1263:ks0108b.c     ****             // Modify the mask to handle the right of the data.
+1264:ks0108b.c     ****             // i.e. valid_mask &= ~((1 << (8 - height)) - 1);
+1265:ks0108b.c     ****             valid_mask &= pgm_read_byte (&bit_shift_maskP[(uint8_t)(8 - height)]);
+ 2445               		.loc 1 1265 0
+ 2446 0902 E8E0      		ldi r30,lo8(8)
+ 2447 0904 ED1B      		sub r30,r29
+ 2448 0906 F0E0      		ldi r31,0
+ 2449 0908 E050      		subi r30,lo8(-(bit_shift_maskP))
+ 2450 090a F040      		sbci r31,hi8(-(bit_shift_maskP))
+ 2451               	/* #APP */
+ 2452               	 ;  1265 "ks0108b.c" 1
+ 2453 090c E491      		lpm r30, Z
+ 2454               		
+ 2455               	 ;  0 "" 2
+ 2456               	.LVL300:
+ 2457               	/* #NOAPP */
+ 2458               	.LBE43:
+ 2459 090e 4E23      		and r20,r30
+ 2460               	.LVL301:
+ 2461               	.L134:
+1266:ks0108b.c     ****         }
+1267:ks0108b.c     **** 
+1268:ks0108b.c     ****         ks0108b_set_column (x, y++, valid_mask, valid_mask, mode | MODE_MERGE);
+ 2462               		.loc 1 1268 0
+ 2463 0910 0F2D      		mov r16,r15
+ 2464 0912 0061      		ori r16,lo8(16)
+ 2465 0914 242F      		mov r18,r20
+ 2466               	.LVL302:
+ 2467 0916 6C2F      		mov r22,r28
+ 2468 0918 812F      		mov r24,r17
+ 2469               	.LVL303:
+ 2470 091a 0E94 0000 		call ks0108b_set_column
+ 2471               	.LVL304:
+1269:ks0108b.c     **** 
+1270:ks0108b.c     ****         // Adust the height now a column has been written.
+1271:ks0108b.c     ****         if (height <= 8)
+ 2472               		.loc 1 1271 0
+ 2473 091e D930      		cpi r29,lo8(9)
+ 2474 0920 00F0      		brlo .L131
+ 2475               	.LVL305:
+1268:ks0108b.c     ****         ks0108b_set_column (x, y++, valid_mask, valid_mask, mode | MODE_MERGE);
+ 2476               		.loc 1 1268 0
+ 2477 0922 CF5F      		subi r28,lo8(-(1))
+ 2478               	.LVL306:
+1272:ks0108b.c     ****             return;                     // Quit - nothing left to do
+1273:ks0108b.c     ****         height -= 8;
+ 2479               		.loc 1 1273 0
+ 2480 0924 D850      		subi r29,lo8(-(-8))
+ 2481               	.LVL307:
+ 2482               	.L133:
+ 2483               	.LBE41:
+1274:ks0108b.c     ****     }
+1275:ks0108b.c     **** 
+1276:ks0108b.c     ****     // Proecess the complete vertical blocks
+1277:ks0108b.c     ****     if ((y1 = (height >> 3)) > 0)
+ 2484               		.loc 1 1277 0
+ 2485 0926 8D2F      		mov r24,r29
+ 2486 0928 8695      		lsr r24
+ 2487 092a 8695      		lsr r24
+ 2488 092c 8695      		lsr r24
+ 2489               	.LVL308:
+ 2490 092e 01F0      		breq .L137
+ 2491 0930 6C2F      		mov r22,r28
+ 2492 0932 C82F      		mov r28,r24
+ 2493               	.LVL309:
+ 2494 0934 C60F      		add r28,r22
+ 2495               	.LVL310:
+ 2496               	.L138:
+1278:ks0108b.c     ****     {
+1279:ks0108b.c     ****         do
+1280:ks0108b.c     ****         {
+1281:ks0108b.c     ****             ks0108b_set_column (x, y++, 0xff, 0xff, mode);
+ 2497               		.loc 1 1281 0 discriminator 1
+ 2498 0936 EE24      		clr r14
+ 2499 0938 E394      		inc r14
+ 2500 093a E60E      		add r14,r22
+ 2501               	.LVL311:
+ 2502 093c 0F2D      		mov r16,r15
+ 2503 093e 2FEF      		ldi r18,lo8(-1)
+ 2504 0940 4FEF      		ldi r20,lo8(-1)
+ 2505 0942 812F      		mov r24,r17
+ 2506 0944 0E94 0000 		call ks0108b_set_column
+ 2507               	.LVL312:
+1282:ks0108b.c     ****         }
+1283:ks0108b.c     ****         while (--y1 > 0);
+ 2508               		.loc 1 1283 0 discriminator 1
+ 2509 0948 CE15      		cp r28,r14
+ 2510 094a 01F0      		breq .L137
+1281:ks0108b.c     ****             ks0108b_set_column (x, y++, 0xff, 0xff, mode);
+ 2511               		.loc 1 1281 0
+ 2512 094c 6E2D      		mov r22,r14
+ 2513 094e 00C0      		rjmp .L138
+ 2514               	.LVL313:
+ 2515               	.L137:
+1284:ks0108b.c     ****     }
+1285:ks0108b.c     **** 
+1286:ks0108b.c     ****     // Process any remaining block
+1287:ks0108b.c     ****     height &= 0x07;
+ 2516               		.loc 1 1287 0
+ 2517 0950 D770      		andi r29,lo8(7)
+ 2518               	.LVL314:
+1288:ks0108b.c     ****     if (height > 0)
+ 2519               		.loc 1 1288 0
+ 2520 0952 01F0      		breq .L131
+ 2521               	.LVL315:
+ 2522               	.LBB44:
+ 2523               	.LBB45:
+1289:ks0108b.c     ****     {
+1290:ks0108b.c     ****         uint8_t valid_mask;             // Mask for the valid bits to write.
+1291:ks0108b.c     **** 
+1292:ks0108b.c     ****         // Create the mask of valid bits.
+1293:ks0108b.c     ****         valid_mask = pgm_read_byte (&bit_shift_maskP[(uint8_t)(8 - height)]);
+ 2524               		.loc 1 1293 0
+ 2525 0954 E8E0      		ldi r30,lo8(8)
+ 2526 0956 ED1B      		sub r30,r29
+ 2527 0958 F0E0      		ldi r31,0
+ 2528 095a E050      		subi r30,lo8(-(bit_shift_maskP))
+ 2529 095c F040      		sbci r31,hi8(-(bit_shift_maskP))
+ 2530               	/* #APP */
+ 2531               	 ;  1293 "ks0108b.c" 1
+ 2532 095e 4491      		lpm r20, Z
+ 2533               		
+ 2534               	 ;  0 "" 2
+ 2535               	.LVL316:
+ 2536               	/* #NOAPP */
+ 2537               	.LBE45:
+1294:ks0108b.c     ****         ks0108b_set_column (x, y, valid_mask, valid_mask, mode | MODE_MERGE);
+ 2538               		.loc 1 1294 0
+ 2539 0960 0F2D      		mov r16,r15
+ 2540 0962 0061      		ori r16,lo8(16)
+ 2541 0964 242F      		mov r18,r20
+ 2542 0966 6C2F      		mov r22,r28
+ 2543 0968 812F      		mov r24,r17
+ 2544 096a 0E94 0000 		call ks0108b_set_column
+ 2545               	.LVL317:
+ 2546               	.L131:
+ 2547               	/* epilogue start */
+ 2548               	.LBE44:
+1295:ks0108b.c     ****     }
+1296:ks0108b.c     **** }
+ 2549               		.loc 1 1296 0
+ 2550 096e DF91      		pop r29
+ 2551               	.LVL318:
+ 2552 0970 CF91      		pop r28
+ 2553 0972 1F91      		pop r17
+ 2554               	.LVL319:
+ 2555 0974 0F91      		pop r16
+ 2556 0976 FF90      		pop r15
+ 2557               	.LVL320:
+ 2558 0978 EF90      		pop r14
+ 2559 097a 0895      		ret
+ 2560               		.cfi_endproc
+ 2561               	.LFE26:
+ 2563               		.local	y_row
+ 2564               		.comm	y_row,1,1
+ 2565               		.comm	line_buffer,16,1
+ 2566               	.Letext0:
+ 2567               		.file 3 "/usr/local/CrossPack-AVR-20131216/avr/include/stdint.h"
+ 2568               		.file 4 "glcd.h"
+DEFINED SYMBOLS
+                            *ABS*:00000000 ks0108b.c
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:2      *ABS*:0000003e __SP_H__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:3      *ABS*:0000003d __SP_L__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:4      *ABS*:0000003f __SREG__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:5      *ABS*:00000000 __tmp_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:6      *ABS*:00000001 __zero_reg__
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:11     .text:00000000 status_check
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:102    .text:00000034 ks0108b_write
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:206    .text:0000008c ks0108b_read
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:302    .text:000000ca set_y_position
+                             .bss:00000000 y_row
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:333    .text:000000e4 read_block
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:638    .text:000001f2 write_block
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:852    .text:000002b8 ks0108b_init
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:904    .text:000002f0 ks0108b_screen_clear
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:983    .text:0000032e ks0108b_vscroll
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:1088   .text:00000390 ks0108b_screen_reverse
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:1160   .text:000003ce ks0108b_set_column
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:1357   .text:00000482 ks0108b_set_pixel
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:1406   .text:000004a4 ks0108b_vbitblt
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:2166   .text:00000816 ks0108b_hline
+/var/folders/9p/f4tvsj_905g4jdfps82fw6pr0000gn/T//cc9Z9SNg.s:2353   .text:000008be ks0108b_vline
+                            *COM*:00000010 line_buffer
+
+UNDEFINED SYMBOLS
+x_dim
+y_dim
+bit_shift_single_maskP
+draw_buffer
+serial_peek
+serial_getc
+serial_flushc
+bit_shift_maskP
+__do_clear_bss
